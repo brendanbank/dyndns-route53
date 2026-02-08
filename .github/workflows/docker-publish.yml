@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -61,37 +63,57 @@ jobs:
       - name: Generate release notes
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
-          cat > release-notes.md << HEADER
-          ## Installation
+          TAG="${GITHUB_REF#refs/tags/}"
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
 
-          ### Quick start
+          echo "## What's New in $TAG" > release-notes.md
+          echo "" >> release-notes.md
 
-          Download [\`compose.example.yaml\`](https://github.com/${{ github.repository }}/blob/${GITHUB_REF_NAME}/compose.example.yaml) and [\`.env.example\`](https://github.com/${{ github.repository }}/blob/${GITHUB_REF_NAME}/.env.example), then:
+          if [ -z "$PREVIOUS_TAG" ]; then
+            echo "### Initial Release" >> release-notes.md
+            echo "" >> release-notes.md
+            echo "A Dynamic DNS web service implementing the DynDNS v2 protocol with pluggable DNS backends:" >> release-notes.md
+            echo "" >> release-notes.md
+            echo "- **AWS Route53** — updates hosted zones via the AWS API (boto3)" >> release-notes.md
+            echo "- **BIND nsupdate** — updates DNS via TSIG-authenticated dynamic updates (dnspython)" >> release-notes.md
+            echo "- **Traefik** reverse proxy with automatic TLS via Let's Encrypt" >> release-notes.md
+            echo "- Multi-platform Docker image (\`amd64\` + \`arm64\`)" >> release-notes.md
+          else
+            echo "### Changes since $PREVIOUS_TAG" >> release-notes.md
+            echo "" >> release-notes.md
+            git log --oneline --no-merges "$PREVIOUS_TAG..HEAD" | while read -r commit; do
+              if [ -n "$commit" ]; then
+                echo "- $commit" >> release-notes.md
+              fi
+            done
+          fi
 
-          \`\`\`bash
-          cp compose.example.yaml compose.yaml
-          cp .env.example .env
-          # Edit .env with your credentials and domain settings
-          docker compose up -d
-          \`\`\`
+          # Docker image section
+          echo "" >> release-notes.md
+          echo "### Docker Image" >> release-notes.md
+          echo "" >> release-notes.md
+          echo '```bash' >> release-notes.md
+          echo "docker pull ghcr.io/${{ github.repository }}:${VERSION}" >> release-notes.md
+          echo '```' >> release-notes.md
+          echo "" >> release-notes.md
+          echo "**Platforms:** \`linux/amd64\`, \`linux/arm64\`" >> release-notes.md
 
-          ### Pull the image directly
-
-          \`\`\`bash
-          docker pull ghcr.io/${{ github.repository }}:${VERSION}
-          \`\`\`
-
-          **Platforms:** \`linux/amd64\`, \`linux/arm64\`
-
-          HEADER
-
-          # Append auto-generated changelog
-          gh api repos/${{ github.repository }}/releases/generate-notes \
-            -f tag_name="${GITHUB_REF_NAME}" \
-            --jq '.body' >> release-notes.md
+          # Usage section
+          echo "" >> release-notes.md
+          echo "### Quick Start" >> release-notes.md
+          echo "" >> release-notes.md
+          echo "Download [\`compose.example.yaml\`](https://github.com/${{ github.repository }}/blob/${TAG}/compose.example.yaml) and [\`.env.example\`](https://github.com/${{ github.repository }}/blob/${TAG}/.env.example), then:" >> release-notes.md
+          echo "" >> release-notes.md
+          echo '```bash' >> release-notes.md
+          echo "cp compose.example.yaml compose.yaml" >> release-notes.md
+          echo "cp .env.example .env" >> release-notes.md
+          echo "# Edit .env with your credentials and domain settings" >> release-notes.md
+          echo "docker compose up -d" >> release-notes.md
+          echo '```' >> release-notes.md
+          echo "" >> release-notes.md
+          echo "See [README](https://github.com/${{ github.repository }}#readme) for full configuration and usage." >> release-notes.md
 
       - name: Create GitHub Release
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')

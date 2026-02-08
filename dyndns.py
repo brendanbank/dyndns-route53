@@ -52,7 +52,7 @@ for ENV in ENV_VARS:
         log.critical(f'Enviroment Variable = {ENV} is not set!')
         exit (1)
     else:
-        log.debug(f'Enviroment Variable {ENV} = {environ.get(ENV)} is set!')
+        log.debug(f'Enviroment Variable {ENV} is set')
 
 app = Flask(__name__)
 

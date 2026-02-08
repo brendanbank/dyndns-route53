@@ -10,4 +10,4 @@ COPY lib/ lib/
 
 EXPOSE 80
 
-CMD ["gunicorn", "--bind", "0.0.0.0:80", "--workers", "2", "dyndns:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:80", "--workers", "2", "--access-logfile", "-", "--access-logformat", "%(h)s %(l)s %(u)s %(t)s \"%(m)s %(U)s %(H)s\" %(s)s %(b)s", "dyndns:app"]

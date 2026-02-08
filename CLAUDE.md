@@ -8,11 +8,16 @@ A Dynamic DNS web service that implements the DynDNS v2 protocol (`/nic/update` 
 
 ## Running
 
-**Docker (production):**
+**Docker (pre-built image):**
+```
+docker compose up -d
+```
+Pulls `ghcr.io/brendanbank/dyndns-route53:latest` from GHCR. Traefik handles TLS; serves on HTTPS (port 443 by default, configurable via `HTTPS_PORT`).
+
+**Docker (local build):**
 ```
 docker compose up --build
 ```
-Traefik handles TLS; serves on HTTPS (port 443 by default, configurable via `HTTPS_PORT`).
 
 **Local development:**
 ```
@@ -67,6 +72,42 @@ All configured in `.env` (loaded via python-dotenv):
 
 **Optional:** `DEBUG=DEBUG` for verbose logging, `HOST` (used by test scripts)
 
+## CI/CD
+
+GitHub Actions workflow (`.github/workflows/docker-publish.yml`) builds and publishes multi-platform Docker images (`linux/amd64`, `linux/arm64`) to GHCR.
+
+**Triggers:**
+- Push tag `v*` → builds image with semver tags (`v1.2.3`, `v1.2`, `v1`, `latest`) and creates a GitHub Release with auto-generated release notes
+- Pull request to `main` → builds image tagged `pr-<number>`
+
+**Releasing a new version:**
+```
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+The workflow uses `docker/metadata-action` for tag extraction, `docker/build-push-action` with QEMU for cross-compilation, GitHub Actions cache for layer caching, and `softprops/action-gh-release` for releases. Release notes are generated from `git log`: initial releases show a feature description only; subsequent releases list commits since the previous tag.
+
+**GHCR package visibility** must be set to public manually via the GitHub web UI (Settings > Danger Zone > Change visibility) — the REST API does not support this for user-owned container packages.
+
 ## Deployment
 
-Docker Compose runs Traefik (TLS via Let's Encrypt) in front of the Flask/uWSGI container. Docker image is based on `tiangolo/uwsgi-nginx-flask:python3.12`. The Dockerfile copies `dyndns.py` as `main.py` (required by the base image). uWSGI config is in `uwsgi.ini`. Compose config sends logs to Loki.
+Docker Compose runs Traefik (TLS via Let's Encrypt) in front of the Flask/uWSGI container. Docker image is based on `tiangolo/uwsgi-nginx-flask:python3.12`. The Dockerfile copies `dyndns.py` as `main.py` (required by the base image). uWSGI config is in `uwsgi.ini`.
+
+There are two compose files:
+- `compose.yaml` — for development. Has `image:` + `build:` (pull uses GHCR, `--build` builds locally). Uses bind-mount for certs, staging ACME server, Loki logging.
+- `compose.example.yaml` — standalone file for end users. No `build:`, named volume for certs, production ACME server, no Loki. Linked from GitHub release notes.
+
+## Testing locally
+
+When testing via curl against the local Traefik instance, you must pass the correct `Host` header since Traefik routes by hostname:
+```
+curl -s -k -H "Host: ${TRAEFIK_HOSTNAME}" -u ${USERNAME}:${PASSWORD_CT} \
+  "https://localhost:${HTTPS_PORT}/nic/update?hostname=test.dyn.bgwlan.nl&myip=203.0.113.1"
+```
+Expected response: `good` (record created/updated) or `nochg` (IP unchanged).
+
+## Security Notes
+
+- `.env` contains secrets and is in `.gitignore` — never commit it
+- If credentials are accidentally committed, rotate them immediately and rewrite git history (`git checkout --orphan` + force push)
+- GHCR package visibility is independent of repo visibility

@@ -36,6 +36,7 @@ from os import environ
 from os import path
 from dotenv import load_dotenv
 import re
+import hmac
 import bcrypt
 
 basedir = path.abspath(path.dirname(__file__))
@@ -90,7 +91,9 @@ def updateDydns():
 
     if (password and username):
         hashed_password = str(environ.get('PASSWORD'))
-        if environ.get('USERNAME') != username or not bcrypt.checkpw(password.encode('utf8'), hashed_password.encode()):
+        valid_user = hmac.compare_digest(environ.get('USERNAME'), username)
+        valid_pass = bcrypt.checkpw(password.encode('utf8'), hashed_password.encode())
+        if not valid_user or not valid_pass:
             log.critical(f'invalid username or password')
             return httpReply("badauth - invalid username or password", returncode=403)
     else:

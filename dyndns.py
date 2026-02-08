@@ -102,7 +102,7 @@ def updateDydns():
             return httpReply("badauth")
     else:
         log.critical(f'invalid username or password')
-        return httpReply("badauth - invalid username or password")
+        return httpReply("badauth")
 
     updatetype = request.args.get("updatetype", default="aws")
     

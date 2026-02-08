@@ -98,14 +98,9 @@ class BaseAccount:
     @staticmethod
     def isvalidhostname(hostnames):
         
-        hostnamesObj = []
-        if (hostnames.find(",")):
-            for hostname in hostnames.split(","):
-                if not hostname or hostname == "":
-                    return(False)
-                hostnamesObj.append(hostname)
-        else:
-            hostnamesObj.append(hostnames)
+        hostnamesObj = hostnames.split(",")
+        if "" in hostnamesObj:
+            return(False)
         
         log.debug(f'hostnames = {hostnamesObj}')    
         for hostname in hostnamesObj:

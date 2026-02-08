@@ -58,14 +58,39 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Generate release notes
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          cat > release-notes.md << 'HEADER'
+          ## Installation
+
+          ### Docker Compose (recommended)
+
+          ```bash
+          cp .env.example .env   # configure credentials and domains
+          docker compose up -d
+          ```
+
+          ### Pull the image directly
+
+          HEADER
+          echo '```bash' >> release-notes.md
+          echo "docker pull ghcr.io/${{ github.repository }}:${VERSION}" >> release-notes.md
+          echo '```' >> release-notes.md
+          echo "" >> release-notes.md
+          echo "**Platforms:** \`linux/amd64\`, \`linux/arm64\`" >> release-notes.md
+          echo "" >> release-notes.md
+
+          # Append auto-generated changelog
+          gh api repos/${{ github.repository }}/releases/generate-notes \
+            -f tag_name="${GITHUB_REF_NAME}" \
+            --jq '.body' >> release-notes.md
+
       - name: Create GitHub Release
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
-          body: |
-            ## Docker image
-
-            ```
-            docker pull ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.version }}
-            ```
+          body_path: release-notes.md

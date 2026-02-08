@@ -143,11 +143,18 @@ def updateDydns():
     log.debug(f'hostnames per zone {hostname_zones}')
     
     
-    if not account.createrecords(str(myip), hostname_zones, rtype=ipType):
-        log.critical(f'account.createrecords returned false')
+    results = account.createrecords(str(myip), hostname_zones, rtype=ipType)
+
+    if not results:
+        log.critical(f'account.createrecords returned no results')
         return httpReply("911")
-    
-    return httpReply(f"good {myip}")
+
+    lines = []
+    for hostname in hostnamesObj:
+        status = results.get(hostname, "dnserr")
+        lines.append(f"{status} {myip}")
+
+    return httpReply("\n".join(lines))
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=8080)

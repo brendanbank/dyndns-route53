@@ -32,6 +32,7 @@
 # - allow for wildcard
 
 from flask import Flask, request, make_response
+from werkzeug.middleware.proxy_fix import ProxyFix
 from os import environ
 from os import path
 from dotenv import load_dotenv
@@ -56,6 +57,7 @@ for ENV in ENV_VARS:
         log.debug(f'Enviroment Variable {ENV} is set')
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 Accounts = AccountFactory()
 
@@ -83,7 +85,7 @@ def updateDydns():
     
 
     url = re.sub(r"password=[^\&]*","password=********", request.url)
-    ip = request.headers.get('X-Forwarded-For') or request.remote_addr
+    ip = request.remote_addr
 
     if not myip:
         myip = ip

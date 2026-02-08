@@ -113,7 +113,7 @@ jobs:
           echo "docker compose up -d" >> release-notes.md
           echo '```' >> release-notes.md
           echo "" >> release-notes.md
-          echo "See [README](https://github.com/${{ github.repository }}#readme) for full configuration and usage." >> release-notes.md
+          echo "See [INSTALLING.md](https://github.com/${{ github.repository }}/blob/${TAG}/INSTALLING.md) for full configuration and usage." >> release-notes.md
 
       - name: Create GitHub Release
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')

@@ -91,7 +91,7 @@ The workflow uses `docker/metadata-action` for tag extraction, `docker/build-pus
 
 ## Deployment
 
-Docker Compose runs Traefik (TLS via Let's Encrypt) in front of the Flask/uWSGI container. Docker image is based on `tiangolo/uwsgi-nginx-flask:python3.12`. The Dockerfile copies `dyndns.py` as `main.py` (required by the base image). uWSGI config is in `uwsgi.ini`.
+Docker Compose runs Traefik (TLS via Let's Encrypt) in front of the Flask/gunicorn container. Docker image is based on `python:3.13-slim` with gunicorn as the WSGI server. Gunicorn imports `dyndns:app` directly (no file renaming needed).
 
 There are two compose files:
 - `compose.yaml` — for development. Has `image:` + `build:` (pull uses GHCR, `--build` builds locally). Uses bind-mount for certs, staging ACME server, Loki logging.

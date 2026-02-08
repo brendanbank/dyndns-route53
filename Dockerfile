@@ -1,9 +1,13 @@
-FROM tiangolo/uwsgi-nginx-flask:python3.12
+FROM python:3.13-slim
 
-COPY ./requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir --upgrade -r /app/requirements.txt
+WORKDIR /app
 
-COPY ./dyndns.py /app/main.py
-COPY ./lib /app/lib
-COPY ./uwsgi.ini /app/uwsgi.ini
-RUN unlink /var/log/nginx/access.log && ln -s /dev/null /var/log/nginx/access.log
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY dyndns.py .
+COPY lib/ lib/
+
+EXPOSE 80
+
+CMD ["gunicorn", "--bind", "0.0.0.0:80", "--workers", "2", "--access-logfile", "-", "dyndns:app"]

@@ -23,7 +23,7 @@ docker compose up --build
 ```
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
-venv/bin/python wsgi.py
+venv/bin/python dyndns.py
 ```
 Runs Flask dev server on `0.0.0.0:8080`.
 

@@ -64,25 +64,29 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
-          cat > release-notes.md << 'HEADER'
+          cat > release-notes.md << HEADER
           ## Installation
 
-          ### Docker Compose (recommended)
+          ### Quick start
 
-          ```bash
-          cp .env.example .env   # configure credentials and domains
+          Download [\`compose.example.yaml\`](https://github.com/${{ github.repository }}/blob/${GITHUB_REF_NAME}/compose.example.yaml) and [\`.env.example\`](https://github.com/${{ github.repository }}/blob/${GITHUB_REF_NAME}/.env.example), then:
+
+          \`\`\`bash
+          cp compose.example.yaml compose.yaml
+          cp .env.example .env
+          # Edit .env with your credentials and domain settings
           docker compose up -d
-          ```
+          \`\`\`
 
           ### Pull the image directly
 
+          \`\`\`bash
+          docker pull ghcr.io/${{ github.repository }}:${VERSION}
+          \`\`\`
+
+          **Platforms:** \`linux/amd64\`, \`linux/arm64\`
+
           HEADER
-          echo '```bash' >> release-notes.md
-          echo "docker pull ghcr.io/${{ github.repository }}:${VERSION}" >> release-notes.md
-          echo '```' >> release-notes.md
-          echo "" >> release-notes.md
-          echo "**Platforms:** \`linux/amd64\`, \`linux/arm64\`" >> release-notes.md
-          echo "" >> release-notes.md
 
           # Append auto-generated changelog
           gh api repos/${{ github.repository }}/releases/generate-notes \

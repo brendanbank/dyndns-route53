@@ -82,6 +82,8 @@ def updateDydns():
     else:
         username = request.args.get("username")
         password = request.args.get("password")
+        if username or password:
+            log.warning(f'credentials passed via query parameters - use HTTP Basic Auth instead')
     
 
     url = re.sub(r"password=[^\&]*","password=********", request.url)

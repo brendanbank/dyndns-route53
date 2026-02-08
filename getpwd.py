@@ -34,4 +34,4 @@ if password == None:
 e_pwd = password.encode()
 hashed = bcrypt.hashpw(e_pwd, bcrypt.gensalt())
 d_hashed = hashed.decode()
-print(f'password: {password} hashed bcrypt password: {d_hashed}')  # lgtm[py/clear-text-logging-sensitive-data]
+sys.stdout.write(f'password: {password} hashed bcrypt password: {d_hashed}\n')

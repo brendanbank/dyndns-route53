@@ -32,10 +32,12 @@
 # - allow for wildcard
 
 from flask import Flask, request, make_response
+from werkzeug.middleware.proxy_fix import ProxyFix
 from os import environ
 from os import path
 from dotenv import load_dotenv
 import re
+import hmac
 import bcrypt
 
 basedir = path.abspath(path.dirname(__file__))
@@ -52,9 +54,10 @@ for ENV in ENV_VARS:
         log.critical(f'Enviroment Variable = {ENV} is not set!')
         exit (1)
     else:
-        log.debug(f'Enviroment Variable {ENV} = {environ.get(ENV)} is set!')
+        log.debug(f'Enviroment Variable {ENV} is set')
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 Accounts = AccountFactory()
 
@@ -79,10 +82,12 @@ def updateDydns():
     else:
         username = request.args.get("username")
         password = request.args.get("password")
+        if username or password:
+            log.warning(f'credentials passed via query parameters - use HTTP Basic Auth instead')
     
 
     url = re.sub(r"password=[^\&]*","password=********", request.url)
-    ip = request.headers.get('X-Forwarded-For') or request.remote_addr
+    ip = request.remote_addr
 
     if not myip:
         myip = ip
@@ -90,12 +95,14 @@ def updateDydns():
 
     if (password and username):
         hashed_password = str(environ.get('PASSWORD'))
-        if environ.get('USERNAME') != username or not bcrypt.checkpw(password.encode('utf8'), hashed_password.encode()):
+        valid_user = hmac.compare_digest(environ.get('USERNAME'), username)
+        valid_pass = bcrypt.checkpw(password.encode('utf8'), hashed_password.encode())
+        if not valid_user or not valid_pass:
             log.critical(f'invalid username or password')
-            return httpReply("badauth - invalid username or password", returncode=403)
+            return httpReply("badauth")
     else:
         log.critical(f'invalid username or password')
-        return httpReply("badauth - invalid username or password", returncode=403)
+        return httpReply("badauth")
 
     updatetype = request.args.get("updatetype", default="aws")
     
@@ -103,7 +110,7 @@ def updateDydns():
     
     if (not account):
         log.critical(f'invalid updatetype')
-        return httpReply("badauth - invalid updatetype", returncode=400)
+        return httpReply("badauth")
 
     ip = account.getip(ip)
     myip = account.getip(myip)
@@ -112,7 +119,7 @@ def updateDydns():
 
     if not myip or not hostnames:
         log.critical(f'invalid IP address {myip} or hostnames {hostnames}')
-        return httpReply(f'911 invalid IP address or hostnames, these cannot be empty.', returncode=400)
+        return httpReply("911")
 
     log.info (f'received request from user {username} for myip = {myip}, hostname = {hostnames}')
 
@@ -120,27 +127,34 @@ def updateDydns():
     
     if (not ipType):
         log.critical(f'invalid IP address {myip}')
-        return httpReply(f'911 invalid IP address {myip}', returncode=400)
+        return httpReply("911")
         
     hostnamesObj = account.isvalidhostname(hostnames)
     
     if (not hostnamesObj):
         log.critical(f'invalid hostname {hostnames}')
-        return httpReply(f'notfqdn invalid hostname {hostnames}', returncode=400)
+        return httpReply("notfqdn")
     
     hostname_zones = account.hostnameperzone(hostnamesObj)
     
     if not hostname_zones:
-        return httpReply("nohost - The hostname/domain specified does not exist in this user account.", returncode=400)
+        return httpReply("nohost")
     
     log.debug(f'hostnames per zone {hostname_zones}')
     
     
-    if not account.createrecords(str(myip), hostname_zones, rtype=ipType):
-        log.critical(f'account.createrecords returned false')
-        return httpReply(f'911 - Something went wrong!', returncode=400)
-    
-    return httpReply("good")
+    results = account.createrecords(str(myip), hostname_zones, rtype=ipType)
+
+    if not results:
+        log.critical(f'account.createrecords returned no results')
+        return httpReply("911")
+
+    lines = []
+    for hostname in hostnamesObj:
+        status = results.get(hostname, "dnserr")
+        lines.append(f"{status} {myip}")
+
+    return httpReply("\n".join(lines))
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=8080)

@@ -147,7 +147,7 @@ def updateDydns():
         log.critical(f'account.createrecords returned false')
         return httpReply("911")
     
-    return httpReply("good")
+    return httpReply(f"good {myip}")
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=8080)

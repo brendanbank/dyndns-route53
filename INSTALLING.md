@@ -111,3 +111,48 @@ docker run --rm ghcr.io/brendanbank/dyndns-route53:latest python3 /app/getpwd.py
 ```
 
 Put the bcrypt hash in your `.env` as `PASSWORD`.
+
+## Testing
+
+Once the service is running, you can test it from the command line.
+
+**curl with HTTP Basic Auth:**
+
+```bash
+curl -u username:password \
+  "https://dyndns.example.com/nic/update?hostname=home.dyn.example.com&myip=203.0.113.1"
+```
+
+**curl with query parameter authentication:**
+
+```bash
+curl "https://dyndns.example.com/nic/update?username=myuser&password=mypassword&hostname=home.dyn.example.com&myip=203.0.113.1"
+```
+
+**wget:**
+
+```bash
+wget -O - --auth-no-challenge --user=username --password=password \
+  "https://dyndns.example.com/nic/update?hostname=home.dyn.example.com&myip=203.0.113.1"
+```
+
+**Using the nsupdate backend:**
+
+```bash
+curl -u username:password \
+  "https://dyndns.example.com/nic/update?hostname=home.dyn.example.com&myip=203.0.113.1&updatetype=nsupdate"
+```
+
+**Testing against a local Traefik instance:**
+
+When testing locally, Traefik routes by `Host` header, so you must pass it explicitly. Use `-k` to accept the self-signed staging certificate:
+
+```bash
+curl -k -u username:password \
+  -H "Host: ${TRAEFIK_HOSTNAME}" \
+  "https://localhost:${HTTPS_PORT}/nic/update?hostname=home.dyn.example.com&myip=203.0.113.1"
+```
+
+**Expected responses:**
+- `good <ip>` — record created or updated
+- `nochg <ip>` — IP unchanged, no update needed

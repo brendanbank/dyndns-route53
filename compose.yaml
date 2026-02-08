@@ -28,9 +28,11 @@ services:
       - .env
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.dyndns.rule=Host(`${TRAEFIK_HOSTNAME}`)"
+      - "traefik.http.routers.dyndns.rule=Host(`${TRAEFIK_HOSTNAME}`) || Host(`${TRAEFIK_HOSTNAME2}`)"
       - "traefik.http.routers.dyndns.entrypoints=websecure"
       - "traefik.http.routers.dyndns.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.dyndns.tls.domains[0].main=${TRAEFIK_HOSTNAME}"
+      - "traefik.http.routers.dyndns.tls.domains[0].sans=${TRAEFIK_HOSTNAME2}"
       - "traefik.http.services.dyndns.loadbalancer.server.port=80"
     restart: always
     logging:

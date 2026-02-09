@@ -156,6 +156,23 @@ else
     fail "/nic/update with updatetype param -> valid response (got: ${body})"
 fi
 
+# 12. /nic/delete with bad auth returns badauth
+body=$(curl "${CURL_OPTS[@]}" -u "baduser:badpass" "${BASE_URL}/nic/delete?hostname=test.example.com")
+if echo "$body" | grep -q 'badauth'; then
+    pass "/nic/delete bad auth -> badauth"
+else
+    fail "/nic/delete bad auth -> badauth (got: ${body})"
+fi
+
+# 13. /nic/delete with valid auth returns valid response
+body=$(curl "${CURL_OPTS[@]}" -u "${USERNAME}:${PASSWORD}" \
+    "${BASE_URL}/nic/delete?hostname=smoketest.example.com")
+if echo "$body" | grep -qE '(nohost|good|nochg|911)'; then
+    pass "/nic/delete valid auth -> valid response (${body})"
+else
+    fail "/nic/delete valid auth -> valid response (got: ${body})"
+fi
+
 echo
 echo "Results: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"
 

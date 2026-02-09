@@ -70,4 +70,36 @@ class nsupdate(BaseAccount):
 
         return (results)
 
+    def deleterecords(self, hostname_zones, rtype=None):
+        log.debug(f'self._zones {self._zones}')
+
+        creds = self._get_credentials()
+        required = ['nsupdate_key', 'nsupdate_algo', 'nsupdate_secret', 'nsupdate_nameserver']
+        if not all(creds.get(k) for k in required):
+            log.error('nsupdate credentials not configured — cannot delete records')
+            return {h: 'dnserr' for hosts in hostname_zones.values() for h in hosts}
+
+        results = {}
+        rtypes = [rtype] if rtype else ['A', 'AAAA']
+
+        for zonename in hostname_zones.keys():
+            for hostname in hostname_zones[zonename]:
+                keyring = dns.tsigkeyring.from_text({creds['nsupdate_key'] + '.': creds['nsupdate_secret']})
+                update = dns.update.Update(zonename + ".", keyring=keyring, keyalgorithm=creds['nsupdate_algo'])
+
+                for rt in rtypes:
+                    update.delete(hostname + ".", rt)
+
+                try:
+                    log.debug(f'try delete zonename = {zonename}, hostname = {hostname}, rtypes = {rtypes}')
+                    response = dns.query.tcp(update, creds['nsupdate_nameserver'])
+                    log.debug(f'response = {response}')
+                    log.info(f'deleted dns records via nsupdate on {creds["nsupdate_nameserver"]}: {hostname} {rtypes} for update type {self._services}')
+                    results[hostname] = "good"
+                except Exception as e:
+                    log.critical(f'something went wrong! {e}')
+                    results[hostname] = "dnserr"
+
+        return results
+
 

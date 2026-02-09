@@ -38,6 +38,35 @@
         </div>
     </div>
 
+    <!-- DynDNS Delete Endpoint -->
+    <div class="accordion-item">
+        <h2 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDelete">
+                DynDNS Delete Endpoint
+            </button>
+        </h2>
+        <div id="collapseDelete" class="accordion-collapse collapse" data-bs-parent="#helpAccordion">
+            <div class="accordion-body">
+                <p>DNS records can be deleted via a single HTTP GET request:</p>
+                <pre class="bg-dark p-3 rounded"><code>GET /nic/delete?hostname=&lt;FQDN&gt;[&amp;myip=&lt;IP&gt;]</code></pre>
+
+                <h5>Parameters</h5>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>hostname</code></td><td>Yes</td><td>Fully qualified domain name to delete (e.g. <code>home.dyn.example.com</code>). Comma-separated for multiple.</td></tr>
+                            <tr><td><code>myip</code></td><td>No</td><td>If provided, only delete the record matching this IP (A or AAAA). If omitted, both A and AAAA records are deleted.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p>Authentication is the same as the update endpoint (HTTP Basic Auth preferred).</p>
+                <pre class="bg-dark p-3 rounded"><code>curl -u username:password "https://dyndns.example.com/nic/delete?hostname=home.dyn.example.com"</code></pre>
+                <p>Returns <span class="badge bg-success">good</span> if records were deleted, <span class="badge bg-info">nochg</span> if no matching records existed.</p>
+            </div>
+        </div>
+    </div>
+
     <!-- Response Codes -->
     <div class="accordion-item">
         <h2 class="accordion-header">

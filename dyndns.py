@@ -284,6 +284,126 @@ def updateDydns():
     return httpReply("\n".join(lines))
 
 
+@nic_update_bp.route("/nic/delete")
+def deleteDyndns():
+    myip = request.args.get("myip")
+
+    hostnames = request.args.get("hostname")
+
+    auth = request.authorization
+
+    if (auth):
+        username = auth.username
+        password = auth.password
+    else:
+        username = request.args.get("username")
+        password = request.args.get("password")
+        if username or password:
+            log.warning('credentials passed via query parameters - use HTTP Basic Auth instead')
+
+    url = re.sub(r"password=[^\&]*", "password=********", request.url)
+    ip = request.remote_addr
+
+    # Authenticate against database
+    user = authenticate_dyndns_user(username, password)
+    if not user:
+        log.critical('invalid username or password')
+        return httpReply("badauth")
+
+    log.info(f'received delete request from {ip} to host: {request.host}  url: {url}')
+
+    if not hostnames:
+        log.critical('missing hostname parameter')
+        return httpReply("911")
+
+    log.info(f'received delete request from user {username} for hostname = {hostnames}, myip = {myip}')
+
+    # Determine which record types to delete
+    rtype = None
+    if myip:
+        validated_ip = BaseAccount.getip(myip)
+        if not validated_ip:
+            log.critical(f'invalid IP address {myip}')
+            return httpReply("911")
+        rtype = BaseAccount.getiptype(validated_ip)
+        if not rtype:
+            log.critical(f'invalid IP address {validated_ip}')
+            return httpReply("911")
+
+    hostnamesObj = BaseAccount.isvalidhostname(hostnames)
+    if not hostnamesObj:
+        log.critical(f'invalid hostname {hostnames}')
+        return httpReply("notfqdn")
+
+    # Process each hostname against all its domain backends
+    lines = []
+    for hostname in hostnamesObj:
+        hn = find_hostname(user, hostname)
+        if not hn:
+            log.warning(f'hostname {hostname} not registered for user {username}')
+            lines.append("nohost")
+            log_event(user, 'dns_delete', hostname=hostname,
+                      ip_address=myip, backend_type=None, response='nohost')
+            continue
+
+        domain = hn.domain
+        backends = domain.backends
+
+        if not backends:
+            log.warning(f'no backends configured for domain {domain.name}')
+            lines.append("911")
+            log_event(user, 'dns_delete', hostname=hostname,
+                      ip_address=myip, backend_type=None, response='911')
+            continue
+
+        # Try all backends for this hostname's domain
+        results = []
+        for db_backend in backends:
+            creds = db_backend.get_credentials()
+            if not creds:
+                log.warning(f'no credentials for domain {domain.name} backend {db_backend.backend_type}')
+                log_event(user, 'dns_delete', hostname=hostname,
+                          ip_address=myip, backend_type=db_backend.backend_type, response='911')
+                results.append('911')
+                continue
+
+            account_dict = {
+                "service": db_backend.backend_type,
+                "domains": [domain.name],
+                "credentials": creds,
+            }
+            account = Accounts.get(account_dict)
+            if not account:
+                log_event(user, 'dns_delete', hostname=hostname,
+                          ip_address=myip, backend_type=db_backend.backend_type, response='911')
+                results.append('911')
+                continue
+
+            hostname_zones = account.hostnameperzone([hostname])
+            if not hostname_zones:
+                log_event(user, 'dns_delete', hostname=hostname,
+                          ip_address=myip, backend_type=db_backend.backend_type, response='nohost')
+                results.append('nohost')
+                continue
+
+            delete_results = account.deleterecords(hostname_zones, rtype=rtype)
+            status = delete_results.get(hostname, "dnserr") if delete_results else "dnserr"
+            log_event(user, 'dns_delete', hostname=hostname,
+                      ip_address=myip, backend_type=db_backend.backend_type, response=status)
+            results.append(status)
+
+        # Aggregate: good if any good, nochg if all nochg, else first error
+        if 'good' in results:
+            lines.append("good")
+        elif all(r == 'nochg' for r in results):
+            lines.append("nochg")
+        else:
+            error_status = next((r for r in results if r not in ('good', 'nochg')), 'dnserr')
+            lines.append(error_status)
+
+    return httpReply("\n".join(lines))
+
+
 if __name__ == "__main__":
     app = create_app()
     app.run(host="0.0.0.0", port=8080)

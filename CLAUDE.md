@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A Dynamic DNS web service that implements the DynDNS v2 protocol (`/nic/update` endpoint). It accepts DNS update requests via HTTP and updates records through pluggable backends: AWS Route53 (via boto3) and BIND nsupdate (via dnspython TSIG). Designed to work with OPNsense's DynDNS client and other DynDNS v2-compatible clients.
+A Dynamic DNS web service that implements the DynDNS v2 protocol (`/nic/update` and `/nic/delete` endpoints). It accepts DNS update and delete requests via HTTP and manages records through pluggable backends: AWS Route53 (via boto3) and BIND nsupdate (via dnspython TSIG). Designed to work with OPNsense's DynDNS client and other DynDNS v2-compatible clients.
 
 Supports multi-user operation with global domains (admin-managed), per-domain backends with shared credentials, user-owned hostnames, and a Bootstrap 5 web UI for administration.
 
@@ -94,15 +94,17 @@ User 1---* Hostname *---1 Domain 1---* DomainBackend 1---* BackendConfig
 
 The `updatetype` parameter is deprecated and ignored — all backends for the domain are updated automatically.
 
+`GET /nic/delete` uses the same auth and hostname lookup. If `myip` is provided, only the matching record type (A or AAAA) is deleted; if omitted, both A and AAAA records are deleted. Calls `deleterecords()` on each backend. Events are logged with `event_type='dns_delete'`.
+
 ### Plugin System (`lib/`)
 
-- `lib/accounts.py` — `BaseAccount` base class and `AccountFactory`. The factory auto-discovers account classes from `lib/account/*.py` at startup via `importlib`. Each backend subclass defines `_services` (list of service names), `match()`, and `createrecords()`.
-- `lib/account/aws.py` — `AWS` class: updates Route53 via boto3. Reads credentials from `account['credentials']` dict (DB-backed) with env var fallback.
-- `lib/account/nsupdate.py` — `nsupdate` class: updates BIND DNS via TSIG-authenticated `dns.update`/`dns.query.tcp`. Same credential pattern.
+- `lib/accounts.py` — `BaseAccount` base class and `AccountFactory`. The factory auto-discovers account classes from `lib/account/*.py` at startup via `importlib`. Each backend subclass defines `_services` (list of service names), `match()`, `createrecords()`, and `deleterecords()`.
+- `lib/account/aws.py` — `AWS` class: updates/deletes Route53 records via boto3. Reads credentials from `account['credentials']` dict (DB-backed) with env var fallback.
+- `lib/account/nsupdate.py` — `nsupdate` class: updates/deletes BIND DNS records via TSIG-authenticated `dns.update`/`dns.query.tcp`. Same credential pattern.
 
 Backend plugins accept domains from `account['domains']` and credentials from `account['credentials']`, falling back to environment variables for backward compatibility.
 
-To add a new DNS backend: create a new file in `lib/account/`, subclass `BaseAccount`, implement `_services`, `match()`, `known_services()`, `_get_credentials()`, and `createrecords()`. It will be auto-registered.
+To add a new DNS backend: create a new file in `lib/account/`, subclass `BaseAccount`, implement `_services`, `match()`, `known_services()`, `_get_credentials()`, `createrecords()`, and `deleterecords()`. It will be auto-registered.
 
 ### Web UI (`web_routes.py`, `templates/`)
 
@@ -189,7 +191,7 @@ There are two compose files:
 
 ## Testing
 
-**Pytest (69 functional tests):**
+**Pytest (77 functional tests):**
 ```
 python -m pytest tests/ -v
 ```
@@ -211,12 +213,35 @@ ruff check .
 ./tests/smoke_test.sh --host dyndns.example.com:9443 --resolve 127.0.0.1 --user admin --pass secret
 ```
 
+**DNS smoke test (real DNS update + delete against live backends):**
+```
+# Load credentials and run (requires .env.smoketest with backend creds)
+source .env.smoketest && ./tests/smoke_test_dns.sh
+
+# Or pass all arguments explicitly
+./tests/smoke_test_dns.sh --host localhost:8080 --http \
+    --user admin --pass secret \
+    --hostname test.dyn.example.com --myip 203.0.113.42 \
+    --nameserver 8.8.8.8
+```
+Creates an A record, verifies it via DNS lookup, confirms `nochg` on duplicate update, deletes the record, verifies deletion, and confirms `nochg` on duplicate delete. Always cleans up test records on exit (even on failure).
+
 **Manual curl against local Traefik** (must pass `Host` header since Traefik routes by hostname):
 ```
+# Update a record
 curl -s -k -H "Host: ${TRAEFIK_HOSTNAME}" -u ${USERNAME}:${PASSWORD} \
   "https://localhost:${HTTPS_PORT}/nic/update?hostname=test.dyn.bgwlan.nl&myip=203.0.113.1"
+
+# Delete a record (both A and AAAA)
+curl -s -k -H "Host: ${TRAEFIK_HOSTNAME}" -u ${USERNAME}:${PASSWORD} \
+  "https://localhost:${HTTPS_PORT}/nic/delete?hostname=test.dyn.bgwlan.nl"
+
+# Delete only the A record matching a specific IP
+curl -s -k -H "Host: ${TRAEFIK_HOSTNAME}" -u ${USERNAME}:${PASSWORD} \
+  "https://localhost:${HTTPS_PORT}/nic/delete?hostname=test.dyn.bgwlan.nl&myip=203.0.113.1"
 ```
-Expected response: `good 203.0.113.1` (record created/updated) or `nochg 203.0.113.1` (IP unchanged).
+Expected update response: `good 203.0.113.1` (record created/updated) or `nochg 203.0.113.1` (IP unchanged).
+Expected delete response: `good` (record deleted) or `nochg` (record didn't exist).
 
 ## Security Notes
 

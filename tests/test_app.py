@@ -338,6 +338,57 @@ class TestDynDNSAPI:
 
 
 # ==============================================================================
+# DynDNS Delete API (/nic/delete)
+# ==============================================================================
+
+class TestDynDNSDeleteAPI:
+
+    def _basic_auth_header(self, username, password):
+        creds = base64.b64encode(f'{username}:{password}'.encode()).decode()
+        return {'Authorization': f'Basic {creds}'}
+
+    def test_delete_no_auth_returns_badauth(self, client):
+        resp = client.get('/nic/delete?hostname=test.example.com')
+        assert resp.status_code == 200
+        assert b'badauth' in resp.data
+
+    def test_delete_unregistered_hostname_returns_nohost(self, client, admin_user):
+        headers = self._basic_auth_header('admin', ADMIN_PASSWORD)
+        resp = client.get('/nic/delete?hostname=test.example.com', headers=headers)
+        assert b'nohost' in resp.data
+
+    def test_delete_invalid_hostname_returns_notfqdn(self, client, admin_user):
+        headers = self._basic_auth_header('admin', ADMIN_PASSWORD)
+        resp = client.get('/nic/delete?hostname=-invalid..host', headers=headers)
+        assert b'notfqdn' in resp.data
+
+    def test_delete_registered_hostname_no_backend_returns_911(self, client, regular_user, test_domain, test_hostname):
+        """Hostname exists but domain has no backends -> 911."""
+        headers = self._basic_auth_header('testuser', TEST_PASSWORD)
+        resp = client.get('/nic/delete?hostname=test.example.com', headers=headers)
+        assert b'911' in resp.data
+
+    def test_delete_missing_hostname_returns_911(self, client, admin_user):
+        headers = self._basic_auth_header('admin', ADMIN_PASSWORD)
+        resp = client.get('/nic/delete', headers=headers)
+        assert b'911' in resp.data
+
+    def test_delete_with_invalid_myip_returns_911(self, client, admin_user):
+        headers = self._basic_auth_header('admin', ADMIN_PASSWORD)
+        resp = client.get('/nic/delete?hostname=test.example.com&myip=notanip', headers=headers)
+        assert b'911' in resp.data
+
+    def test_delete_creates_event(self, client, admin_user, app):
+        headers = {'Authorization': 'Basic ' + base64.b64encode(b'admin:' + ADMIN_PASSWORD.encode()).decode()}
+        client.get('/nic/delete?hostname=test.example.com', headers=headers)
+        from models import Event
+        with app.app_context():
+            events = Event.query.filter_by(event_type='dns_delete').all()
+            assert len(events) >= 1
+            assert events[0].username == 'admin'
+
+
+# ==============================================================================
 # Events
 # ==============================================================================
 

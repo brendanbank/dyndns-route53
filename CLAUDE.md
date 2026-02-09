@@ -55,7 +55,7 @@ python3 getpwd.py [optional-plaintext-password]
 - Flask-WTF CSRF protection (exempted for `/nic/update`)
 - Two blueprints: `nic_update_bp` (DynDNS API) and `web_bp` (admin UI)
 
-The module-level `app = create_app()` maintains compatibility with `gunicorn dyndns:app`.
+Gunicorn uses the factory syntax `dyndns:create_app()` to create the app at worker startup.
 
 ### Request Flow
 

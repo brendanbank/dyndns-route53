@@ -32,6 +32,7 @@ from flask import Flask, request, make_response
 from werkzeug.middleware.proxy_fix import ProxyFix
 import re
 import os
+from datetime import datetime, timedelta, timezone
 
 import bcrypt as _bcrypt
 
@@ -146,6 +147,9 @@ def log_event(user, event_type, hostname=None, ip_address=None, backend_type=Non
             detail=detail,
         )
         db.session.add(ev)
+        # Prune events older than 24 hours
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        Event.query.filter(Event.created_at < cutoff).delete()
         db.session.commit()
     except Exception as e:
         log.error(f'Failed to log event: {e}')

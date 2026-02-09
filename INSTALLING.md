@@ -100,7 +100,7 @@ All configuration is done through environment variables in a `.env` file. See [`
 
 ### Legacy Environment Variables
 
-These are supported for backward compatibility. After migrating to the database with `python3 migrate_env.py`, they can be removed.
+These are supported for backward compatibility and can be removed once users and domains are configured via the web UI.
 
 | Variable | Description |
 |----------|-------------|

@@ -30,16 +30,6 @@ cp .env.example .env   # edit with SECRET_KEY, FERNET_KEY, ADMIN_PASSWORD
 ```
 Runs Flask dev server on `0.0.0.0:8080`. Web UI at `http://localhost:8080/admin/login`.
 
-**Migrate existing .env credentials to database:**
-```
-python3 migrate_env.py
-```
-
-**Migrate old schema (UserDomain) to new schema (Domain/Hostname):**
-```
-python3 migrate_schema.py
-```
-
 **Testing an update:**
 ```
 ./tests/dyndns-client-test.sh  # tests against HOST from .env

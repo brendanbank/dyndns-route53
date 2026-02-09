@@ -135,7 +135,7 @@ else
 fi
 
 # Wait for DNS propagation across all backends
-sleep 5
+sleep 10
 
 # --- Step 3: Verify A record exists ---
 echo
@@ -170,7 +170,7 @@ else
 fi
 
 # Wait for DNS propagation
-sleep 3
+sleep 10
 
 # --- Step 6: Verify record is gone ---
 echo

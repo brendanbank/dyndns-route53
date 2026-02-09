@@ -9,13 +9,23 @@ The easiest way to run dyndns-route53 is with the pre-built Docker image and the
    ```bash
    cp compose.example.yaml compose.yaml
    cp .env.example .env
-   # Edit .env with your credentials and domain settings
+   # Edit .env — at minimum set SECRET_KEY, FERNET_KEY, ADMIN_PASSWORD, TRAEFIK_HOSTNAME, LETSENCRYPT_EMAIL
    ```
-3. Generate a bcrypt password hash (see [Generating Passwords](#generating-passwords))
-4. Start the service:
+   Generate the required values:
+   ```bash
+   # SECRET_KEY
+   python3 -c "import secrets; print(secrets.token_hex(32))"
+   # FERNET_KEY
+   python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   # ADMIN_PASSWORD (generates a random password and its bcrypt hash)
+   python3 getpwd.py
+   ```
+3. Start the service:
    ```bash
    docker compose up -d
    ```
+
+The database and admin user are created automatically on first boot. If `ADMIN_PASSWORD` is not set, the container will fail to start with an error message.
 
 Traefik handles TLS termination via Let's Encrypt. HTTP (port 80) redirects to HTTPS (port 443) automatically.
 
@@ -26,7 +36,7 @@ To build the image locally from source:
 ```bash
 git clone git@github.com:brendanbank/dyndns-route53.git
 cd dyndns-route53
-cp .env.example .env   # edit with your credentials
+cp .env.example .env   # edit with your settings
 docker compose up --build
 ```
 
@@ -35,48 +45,44 @@ docker compose up --build
 ```bash
 git clone git@github.com:brendanbank/dyndns-route53.git
 cd dyndns-route53
-python3 -m venv venv
-venv/bin/pip install -r requirements.txt
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env   # edit with your settings (SECRET_KEY, FERNET_KEY, ADMIN_PASSWORD)
 ```
 
 Run the development server:
 
 ```bash
-venv/bin/python wsgi.py
+.venv/bin/python dyndns.py
 ```
 
-The Flask dev server listens on `0.0.0.0:8080`. For production, use Docker Compose with Traefik.
+The Flask dev server listens on `0.0.0.0:8080`. The web UI is at `http://localhost:8080/admin/login`. For production, use Docker Compose with Traefik.
+
+## First Login
+
+1. Open the web UI at `https://your-hostname/admin/login`
+2. Log in with `admin` and the password you set via `ADMIN_PASSWORD`
+3. You will be prompted to set up TOTP two-factor authentication (scan QR code with an authenticator app)
+4. After 2FA setup, you'll be logged into the admin dashboard
 
 ## Configuration
 
 All configuration is done through environment variables in a `.env` file. See [`.env.example`](.env.example) for a template.
 
-### General (required)
+### Required
 
 | Variable | Description |
 |----------|-------------|
-| `USERNAME` | Username for DynDNS v2 HTTP Basic Authentication |
-| `PASSWORD` | Bcrypt-hashed password (generate with `python3 getpwd.py`) |
-| `DOMAINS` | Comma-separated list of domains allowed for updates (e.g. `dyn.example.com,example.org`) |
+| `SECRET_KEY` | Flask session secret (generate with `python3 -c "import secrets; print(secrets.token_hex(32))"`) |
+| `FERNET_KEY` | Encryption key for backend credentials (generate with `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`) |
+| `ADMIN_PASSWORD` | Bcrypt-hashed password for the initial admin user (generate with `python3 getpwd.py`) |
+
+### Optional
+
+| Variable | Description |
+|----------|-------------|
+| `ADMIN_TOTP_SECRET` | Pre-shared TOTP secret for admin 2FA (generate with `python3 -c "import pyotp; print(pyotp.random_base32())"`) |
 | `DEBUG` | Set to `DEBUG` for verbose logging |
-
-### AWS Route53 Backend
-
-| Variable | Description |
-|----------|-------------|
-| `AWS_ACCESS_KEY_ID` | AWS access key with IAM permissions for Route53 |
-| `AWS_SECRET_ACCESS_KEY` | Secret key linked to the access key |
-
-The AWS backend automatically discovers hosted zones from your Route53 account. Only zones matching `DOMAINS` will be used.
-
-### nsupdate Backend
-
-| Variable | Description |
-|----------|-------------|
-| `NSUPDATE_KEY` | TSIG key name |
-| `NSUPDATE_ALGO` | TSIG algorithm (e.g. `hmac-sha512`) |
-| `NSUPDATE_SECRET` | TSIG shared secret (base64) |
-| `NSUPDATE_NAMESERVER` | IP address of the authoritative nameserver |
 
 ### Traefik Reverse Proxy
 
@@ -91,6 +97,33 @@ The AWS backend automatically discovers hosted zones from your Route53 account. 
 **ACME CA server URLs:**
 - **Staging** (for testing): `https://acme-staging-v02.api.letsencrypt.org/directory`
 - **Production** (for real certs): `https://acme-v02.api.letsencrypt.org/directory`
+
+### Legacy Environment Variables
+
+These are supported for backward compatibility. After migrating to the database with `python3 migrate_env.py`, they can be removed.
+
+| Variable | Description |
+|----------|-------------|
+| `USERNAME` | DynDNS username |
+| `PASSWORD` | Bcrypt-hashed password |
+| `DOMAINS` | Comma-separated list of allowed domains |
+| `AWS_ACCESS_KEY_ID` | AWS access key for Route53 |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret key |
+| `NSUPDATE_KEY` | TSIG key name |
+| `NSUPDATE_ALGO` | TSIG algorithm (e.g. `hmac-sha512`) |
+| `NSUPDATE_SECRET` | TSIG shared secret (base64) |
+| `NSUPDATE_NAMESERVER` | IP of the authoritative nameserver |
+
+## Managing Users and Domains
+
+All user and domain management is done through the web UI at `/admin/`.
+
+**As admin:**
+1. Create users at `/admin/users/new`
+2. Assign domains to users at `/admin/users/<id>/domains`
+3. Configure backend credentials per domain at the domain config page
+
+Each user can have multiple domains, each with its own backend type (AWS or nsupdate) and credentials. Credentials are Fernet-encrypted at rest in the database.
 
 ## Generating Passwords
 
@@ -110,29 +143,24 @@ If running via Docker without a local Python environment:
 docker run --rm ghcr.io/brendanbank/dyndns-route53:latest python3 /app/getpwd.py
 ```
 
-Put the bcrypt hash in your `.env` as `PASSWORD`.
-
 ## Testing
 
-Once the service is running, you can test it from the command line.
+### Automated tests
+
+```bash
+# Run the pytest suite (48 tests)
+python -m pytest tests/ -v
+
+# Lint check
+ruff check .
+```
+
+### Manual testing
 
 **curl with HTTP Basic Auth:**
 
 ```bash
 curl -u username:password \
-  "https://dyndns.example.com/nic/update?hostname=home.dyn.example.com&myip=203.0.113.1"
-```
-
-**curl with query parameter authentication:**
-
-```bash
-curl "https://dyndns.example.com/nic/update?username=myuser&password=mypassword&hostname=home.dyn.example.com&myip=203.0.113.1"
-```
-
-**wget:**
-
-```bash
-wget -O - --auth-no-challenge --user=username --password=password \
   "https://dyndns.example.com/nic/update?hostname=home.dyn.example.com&myip=203.0.113.1"
 ```
 
@@ -153,6 +181,23 @@ curl -k -u username:password \
   "https://localhost:${HTTPS_PORT}/nic/update?hostname=home.dyn.example.com&myip=203.0.113.1"
 ```
 
+### Deployment smoke test
+
+```bash
+# Against production (HTTPS)
+./tests/smoke_test.sh --host dyndns.example.com --user admin --pass secret
+
+# Against local Flask dev server (HTTP)
+./tests/smoke_test.sh --http --host localhost:8080 --user admin --pass secret
+
+# Against local Docker with Traefik (HTTPS, resolve hostname to localhost)
+./tests/smoke_test.sh --host dyndns.example.com:9443 --resolve 127.0.0.1 --user admin --pass secret
+```
+
 **Expected responses:**
 - `good <ip>` — record created or updated
 - `nochg <ip>` — IP unchanged, no update needed
+- `nohost <ip>` — hostname not in user's assigned domains
+- `badauth` — invalid credentials
+- `notfqdn` — invalid hostname format
+- `911` — server error

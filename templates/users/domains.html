@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Domains for {{ user.username }} - DynDNS Admin{% endblock %}
+{% block content %}
+<h2>Domains for {{ user.username }}</h2>
+
+<div class="row">
+    <div class="col-md-10">
+        {% if user_domains %}
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Domain</th>
+                    <th>Backend</th>
+                    <th>Credentials</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ud in user_domains %}
+                <tr>
+                    <td>{{ ud.domain_name }}</td>
+                    <td><span class="badge bg-secondary">{{ ud.backend_type }}</span></td>
+                    <td>
+                        {% if ud.has_credentials %}
+                        <span class="badge bg-success">Configured</span>
+                        {% else %}
+                        <span class="badge bg-warning text-dark">Not configured</span>
+                        {% endif %}
+                        <a href="{{ url_for('web.domain_backend_config', user_id=user.id, ud_id=ud.id) }}"
+                           class="btn btn-sm btn-outline-info ms-1">Configure</a>
+                    </td>
+                    <td>
+                        <form method="POST" action="{{ url_for('web.user_domain_delete', user_id=user.id, ud_id=ud.id) }}"
+                              style="display:inline" onsubmit="return confirm('Remove this domain?')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted">No domains configured.</p>
+        {% endif %}
+    </div>
+</div>
+
+<h4 class="mt-4">Add Domain</h4>
+<div class="row">
+    <div class="col-md-6">
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+                <label for="domain_name" class="form-label">Domain Name</label>
+                <input type="text" class="form-control" id="domain_name" name="domain_name"
+                       placeholder="e.g. dyn.example.com" required>
+            </div>
+            <div class="mb-3">
+                <label for="backend_type" class="form-label">Backend</label>
+                <select class="form-select" id="backend_type" name="backend_type">
+                    <option value="aws">AWS Route53</option>
+                    <option value="nsupdate">nsupdate</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary">Add</button>
+        </form>
+    </div>
+</div>
+
+<div class="mt-3">
+    <a href="{{ url_for('web.user_edit', user_id=user.id) }}" class="btn btn-outline-secondary">Back to User</a>
+</div>
+{% endblock %}

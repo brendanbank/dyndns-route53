@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Users - DynDNS Admin{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>Users</h2>
+    <a href="{{ url_for('web.user_create') }}" class="btn btn-primary">New User</a>
+</div>
+<div class="table-responsive">
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Username</th>
+                <th>Role</th>
+                <th>Active</th>
+                <th>2FA</th>
+                <th>Domains</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+            <tr>
+                <td><a href="{{ url_for('web.user_edit', user_id=user.id) }}">{{ user.username }}</a></td>
+                <td><span class="badge bg-{{ 'warning' if user.is_admin else 'secondary' }}">{{ user.role }}</span></td>
+                <td>{{ 'Yes' if user.is_active else 'No' }}</td>
+                <td><span class="badge bg-{{ 'success' if user.has_totp else 'secondary' }}">{{ 'Yes' if user.has_totp else 'No' }}</span></td>
+                <td>{{ user.domains|length }}</td>
+                <td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '' }}</td>
+                <td>
+                    <a href="{{ url_for('web.user_edit', user_id=user.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                    <a href="{{ url_for('web.user_domains', user_id=user.id) }}" class="btn btn-sm btn-outline-info">Domains</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

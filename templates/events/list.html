@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Events - DynDNS Admin{% endblock %}
+{% block content %}
+<h2>Events</h2>
+
+<form method="GET" class="row g-3 mb-4">
+    {% if current_user.is_admin %}
+    <div class="col-auto">
+        <input type="text" class="form-control" name="username" value="{{ username_filter }}" placeholder="Filter by username">
+    </div>
+    {% endif %}
+    <div class="col-auto">
+        <input type="text" class="form-control" name="hostname" value="{{ hostname_filter }}" placeholder="Filter by hostname">
+    </div>
+    <div class="col-auto">
+        <button type="submit" class="btn btn-outline-primary">Filter</button>
+        <a href="{{ url_for('web.event_list') }}" class="btn btn-outline-secondary">Clear</a>
+    </div>
+</form>
+
+<div class="table-responsive">
+    <table class="table table-sm table-striped">
+        <thead>
+            <tr>
+                <th>Time</th>
+                {% if current_user.is_admin %}<th>User</th>{% endif %}
+                <th>Type</th>
+                <th>Hostname</th>
+                <th>IP</th>
+                <th>Backend</th>
+                <th>Response</th>
+                <th>Detail</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in events.items %}
+            <tr>
+                <td>{{ event.created_at.strftime('%Y-%m-%d %H:%M:%S') if event.created_at else '' }}</td>
+                {% if current_user.is_admin %}<td>{{ event.username }}</td>{% endif %}
+                <td>{{ event.event_type }}</td>
+                <td>{{ event.hostname or '' }}</td>
+                <td>{{ event.ip_address or '' }}</td>
+                <td>{{ event.backend_type or '' }}</td>
+                <td>
+                    {% if event.response == 'good' %}
+                    <span class="badge bg-success">{{ event.response }}</span>
+                    {% elif event.response == 'nochg' %}
+                    <span class="badge bg-info">{{ event.response }}</span>
+                    {% elif event.response %}
+                    <span class="badge bg-danger">{{ event.response }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ event.detail or '' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if events.pages > 1 %}
+<nav>
+    <ul class="pagination">
+        {% if events.has_prev %}
+        <li class="page-item">
+            <a class="page-link" href="{{ url_for('web.event_list', page=events.prev_num, username=username_filter, hostname=hostname_filter) }}">Previous</a>
+        </li>
+        {% endif %}
+        {% for p in events.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+        {% if p %}
+        <li class="page-item {{ 'active' if p == events.page else '' }}">
+            <a class="page-link" href="{{ url_for('web.event_list', page=p, username=username_filter, hostname=hostname_filter) }}">{{ p }}</a>
+        </li>
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+        {% endif %}
+        {% endfor %}
+        {% if events.has_next %}
+        <li class="page-item">
+            <a class="page-link" href="{{ url_for('web.event_list', page=events.next_num, username=username_filter, hostname=hostname_filter) }}">Next</a>
+        </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% endblock %}

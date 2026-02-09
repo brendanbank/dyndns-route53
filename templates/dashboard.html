@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - DynDNS Admin{% endblock %}
+{% block content %}
+<h2>Dashboard</h2>
+
+{% if current_user.is_admin %}
+<div class="row mt-4">
+    <div class="col-md-4">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">Users</h5>
+                <p class="display-6">{{ user_count }}</p>
+                <a href="{{ url_for('web.user_list') }}" class="btn btn-outline-primary btn-sm">Manage</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">Domains</h5>
+                <p class="display-6">{{ domain_count }}</p>
+                <a href="{{ url_for('web.user_list') }}" class="btn btn-outline-primary btn-sm">Manage</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">Events</h5>
+                <p class="display-6">{{ event_count }}</p>
+                <a href="{{ url_for('web.event_list') }}" class="btn btn-outline-primary btn-sm">View All</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="row mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">My Domains</div>
+            <div class="card-body">
+                {% if user_domains %}
+                <ul class="list-group list-group-flush">
+                    {% for ud in user_domains %}
+                    <li class="list-group-item d-flex justify-content-between">
+                        {{ ud.domain_name }}
+                        <span class="badge bg-secondary">{{ ud.backend_type }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted">No domains assigned.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<h4 class="mt-4">Recent Events</h4>
+{% if recent_events %}
+<div class="table-responsive">
+    <table class="table table-sm table-striped">
+        <thead>
+            <tr>
+                <th>Time</th>
+                {% if current_user.is_admin %}<th>User</th>{% endif %}
+                <th>Type</th>
+                <th>Hostname</th>
+                <th>IP</th>
+                <th>Backend</th>
+                <th>Response</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in recent_events %}
+            <tr>
+                <td>{{ event.created_at.strftime('%Y-%m-%d %H:%M:%S') if event.created_at else '' }}</td>
+                {% if current_user.is_admin %}<td>{{ event.username }}</td>{% endif %}
+                <td>{{ event.event_type }}</td>
+                <td>{{ event.hostname or '' }}</td>
+                <td>{{ event.ip_address or '' }}</td>
+                <td>{{ event.backend_type or '' }}</td>
+                <td>
+                    {% if event.response == 'good' %}
+                    <span class="badge bg-success">{{ event.response }}</span>
+                    {% elif event.response == 'nochg' %}
+                    <span class="badge bg-info">{{ event.response }}</span>
+                    {% else %}
+                    <span class="badge bg-danger">{{ event.response }}</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p class="text-muted">No events yet.</p>
+{% endif %}
+{% endblock %}

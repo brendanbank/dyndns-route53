@@ -25,9 +25,13 @@
 
 When you push a `v*` tag, the GitHub Actions workflow:
 
-1. Builds a multi-platform Docker image (`linux/amd64` + `linux/arm64`)
-2. Pushes it to `ghcr.io/brendanbank/dyndns-route53` with semver tags
-3. Creates a GitHub Release with auto-generated release notes
+1. Runs **ruff** lint check and **pytest** (48 functional tests)
+2. Builds a multi-platform Docker image (`linux/amd64` + `linux/arm64`)
+3. Pushes it to `ghcr.io/brendanbank/dyndns-route53` with semver tags
+4. Runs **Trivy** vulnerability scan
+5. Creates a GitHub Release with auto-generated release notes
+
+If the lint or test step fails, the Docker image is not built or pushed.
 
 ### Image Tag Strategy
 

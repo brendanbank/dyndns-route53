@@ -6,16 +6,6 @@ from os import environ
 from . import log
 
 
-ENV_VARS = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY']
-
-for ENV in ENV_VARS:
-    if not environ.get(ENV):
-        log.critical(f'Enviroment Variable = {ENV} is not set!')
-        exit (1)
-    else:
-        log.debug(f'Enviroment Variable = {ENV} is set!')
-
-
 class AWS(BaseAccount):
     _services = ['aws']
 
@@ -31,30 +21,44 @@ class AWS(BaseAccount):
     def match(account):
         return account.get('service') in AWS._services
 
+    def _get_credentials(self):
+        creds = self._account.get('credentials', {})
+        return {
+            'aws_access_key_id': creds.get('aws_access_key_id', environ.get('AWS_ACCESS_KEY_ID')),
+            'aws_secret_access_key': creds.get('aws_secret_access_key', environ.get('AWS_SECRET_ACCESS_KEY')),
+        }
 
     def gethostedzones(self):
-        client = boto3.client('route53',
-            aws_access_key_id=environ.get('AWS_ACCESS_KEY_ID'),
-            aws_secret_access_key=environ.get('AWS_SECRET_ACCESS_KEY'))
-    
-        response = client.list_hosted_zones()
-    
+        creds = self._get_credentials()
+        if not creds.get('aws_access_key_id') or not creds.get('aws_secret_access_key'):
+            log.error('AWS credentials not configured')
+            return self._zones.keys()
+
+        try:
+            client = boto3.client('route53', **creds)
+            response = client.list_hosted_zones()
+        except Exception as e:
+            log.error(f'Failed to list hosted zones: {e}')
+            return self._zones.keys()
+
         log.debug(f'list_hosted_zones = {response}')
         for zone in response["HostedZones"]:
             if zone["Name"].find("in-addr.arpa.") >= 0  or zone["Name"].find("ip6.arpa.") >= 0:
                 continue
-    
+
             self._zones[zone["Name"][:-1]] = zone["Id"]
-    
+
         log.debug(f'_zones.keys = {self._zones.keys()}')
-    
+
         return(self._zones.keys())
 
     def createrecords(self, IP, hostname_zones, rtype="A", ttl=300):
+        creds = self._get_credentials()
+        if not creds.get('aws_access_key_id') or not creds.get('aws_secret_access_key'):
+            log.error('AWS credentials not configured — cannot create records')
+            return {h: 'dnserr' for hosts in hostname_zones.values() for h in hosts}
 
-        client = boto3.client('route53',
-            aws_access_key_id=environ.get('AWS_ACCESS_KEY_ID'),
-            aws_secret_access_key=environ.get('AWS_SECRET_ACCESS_KEY'))
+        client = boto3.client('route53', **creds)
 
         log.debug(f'_zones.keys = {self._zones}')
 
@@ -108,4 +112,3 @@ class AWS(BaseAccount):
                 log.info(f'created dns entry via route53 record: {hostname} {rtype} {IP} for update type {self._services}')
 
         return (results)
-

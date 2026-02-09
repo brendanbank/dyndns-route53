@@ -1,2 +1,2 @@
-from .accounts import AccountFactory
-from .log import log
+from .accounts import AccountFactory as AccountFactory
+from .log import log as log

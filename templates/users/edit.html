@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}{{ 'New User' if is_new else 'Edit User' }} - DynDNS Admin{% endblock %}
+{% block content %}
+<h2>{{ 'New User' if is_new else 'Edit User: ' + user.username }}</h2>
+<div class="row">
+    <div class="col-md-6">
+        <form method="POST">
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                {{ form.username.label(class="form-label") }}
+                {{ form.username(class="form-control") }}
+                {% for error in form.username.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+            </div>
+            <div class="mb-3">
+                {{ form.password.label(class="form-label") }}
+                {{ form.password(class="form-control", placeholder="Leave blank to keep current" if not is_new else "") }}
+                {% for error in form.password.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+                {% if not is_new %}
+                <div class="form-text">Leave blank to keep the current password.</div>
+                {% endif %}
+            </div>
+            <div class="mb-3">
+                {{ form.role.label(class="form-label") }}
+                {{ form.role(class="form-select") }}
+            </div>
+            <div class="mb-3 form-check">
+                {{ form.is_active(class="form-check-input") }}
+                {{ form.is_active.label(class="form-check-label") }}
+            </div>
+            <div class="d-flex gap-2">
+                {{ form.submit(class="btn btn-primary") }}
+                <a href="{{ url_for('web.user_list') }}" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+        </form>
+
+        {% if not is_new %}
+        <hr>
+        <h5>Domains</h5>
+        <a href="{{ url_for('web.user_domains', user_id=user.id) }}" class="btn btn-outline-primary btn-sm mb-3">Manage Domains</a>
+
+        <hr>
+        <h5>Two-Factor Authentication</h5>
+        {% if user.has_totp %}
+        <p>Status: <span class="badge bg-success">Enabled</span></p>
+        <form method="POST" action="{{ url_for('web.user_reset_totp', user_id=user.id) }}"
+              onsubmit="return confirm('Reset 2FA for {{ user.username }}? They will need to set it up again on next login.')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-warning btn-sm mb-3">Reset 2FA</button>
+        </form>
+        {% else %}
+        <p>Status: <span class="badge bg-secondary">Not configured</span></p>
+        {% endif %}
+
+        <hr>
+        <form method="POST" action="{{ url_for('web.user_delete', user_id=user.id) }}"
+              onsubmit="return confirm('Delete user {{ user.username }}?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger btn-sm">Delete User</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -3,18 +3,15 @@
 # Usage:
 #   1. Copy this file:        cp compose.example.yaml compose.yaml
 #   2. Create your env file:  cp .env.example .env
-#   3. Edit .env with your credentials and domain settings
-#   4. Generate a password:   docker run --rm ghcr.io/brendanbank/dyndns-route53:latest python3 /app/getpwd.py
-#   5. Start the service:     docker compose up -d
+#   3. Edit .env with your SECRET_KEY, FERNET_KEY, and ADMIN_PASSWORD
+#   4. Start the service:     docker compose up -d
+#   5. Log in at https://${TRAEFIK_HOSTNAME}/admin/login
 #
 # Traefik handles TLS automatically via Let's Encrypt.
 # HTTP (port 80) redirects to HTTPS (port 443).
 #
 # Test with curl:
-#   curl -k -u ${USERNAME}:${PASSWORD_CT} "https://${TRAEFIK_HOSTNAME}:${HTTPS_PORT}/nic/update?hostname=${HOSTNAME}&myip=${MYIP}"
-#
-# Test with wget:
-#   wget -O - --no-check-certificate --auth-no-challenge --user=${USERNAME} --password=${PASSWORD_CT} "https://${TRAEFIK_HOSTNAME}:${HTTPS_PORT}/nic/update?hostname=${HOSTNAME}&myip=${MYIP}"
+#   curl -k -u ${USERNAME}:${PASSWORD} "https://${TRAEFIK_HOSTNAME}:${HTTPS_PORT}/nic/update?hostname=test.dyn.example.com&myip=203.0.113.1"
 
 services:
   traefik:
@@ -41,6 +38,8 @@ services:
       - 80
     env_file:
       - .env
+    volumes:
+      - dyndns-data:/app/instance
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.dyndns.rule=Host(`${TRAEFIK_HOSTNAME}`)"
@@ -51,3 +50,4 @@ services:
 
 volumes:
   letsencrypt:
+  dyndns-data:

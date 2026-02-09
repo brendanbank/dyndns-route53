@@ -119,11 +119,12 @@ These are supported for backward compatibility and can be removed once users and
 All user and domain management is done through the web UI at `/admin/`.
 
 **As admin:**
-1. Create users at `/admin/users/new`
-2. Assign domains to users at `/admin/users/<id>/domains`
-3. Configure backend credentials per domain at the domain config page
+1. Create global domains at `/admin/domains` (e.g. `dyn.example.com`)
+2. Configure backends (AWS Route53, nsupdate) and credentials per domain
+3. Create users at `/admin/users/new`
+4. Add hostnames for users under the configured domains (e.g. `home.dyn.example.com`)
 
-Each user can have multiple domains, each with its own backend type (AWS or nsupdate) and credentials. Credentials are Fernet-encrypted at rest in the database.
+Users can also self-register hostnames under available domains from their profile. Each domain can have multiple backends — all are updated when a hostname is changed. Credentials are Fernet-encrypted at rest in the database.
 
 ## Generating Passwords
 
@@ -148,7 +149,7 @@ docker run --rm ghcr.io/brendanbank/dyndns-route53:latest python3 /app/getpwd.py
 ### Automated tests
 
 ```bash
-# Run the pytest suite (48 tests)
+# Run the pytest suite (77 tests)
 python -m pytest tests/ -v
 
 # Lint check
@@ -164,11 +165,16 @@ curl -u username:password \
   "https://dyndns.example.com/nic/update?hostname=home.dyn.example.com&myip=203.0.113.1"
 ```
 
-**Using the nsupdate backend:**
+**Deleting a DNS record:**
 
 ```bash
+# Delete both A and AAAA records
 curl -u username:password \
-  "https://dyndns.example.com/nic/update?hostname=home.dyn.example.com&myip=203.0.113.1&updatetype=nsupdate"
+  "https://dyndns.example.com/nic/delete?hostname=home.dyn.example.com"
+
+# Delete only the A record matching a specific IP
+curl -u username:password \
+  "https://dyndns.example.com/nic/delete?hostname=home.dyn.example.com&myip=203.0.113.1"
 ```
 
 **Testing against a local Traefik instance:**

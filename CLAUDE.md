@@ -54,7 +54,7 @@ python3 getpwd.py [optional-plaintext-password]
 `dyndns.py` uses Flask's application factory pattern (`create_app()`). It initializes:
 - Flask-SQLAlchemy (`db`) with dual binds: main DB (`instance/dyndns.db`) and events DB (`instance/events.db`)
 - Flask-Login for web session auth
-- Flask-WTF CSRF protection (exempted for `/nic/update`)
+- Flask-WTF CSRF protection (exempted for `/nic/update` and `/nic/delete`)
 - Two blueprints: `nic_update_bp` (DynDNS API) and `web_bp` (admin UI)
 
 Gunicorn uses the factory syntax `dyndns:create_app()` to create the app at worker startup.
@@ -167,7 +167,7 @@ git tag v1.0.0 && git push origin v1.0.0
 
 ## Deployment
 
-Docker Compose runs Traefik (TLS via Let's Encrypt HTTP-01 challenge) in front of the Flask/gunicorn container. Docker image is based on `python:3.13-slim` with gunicorn as the WSGI server. Gunicorn imports `dyndns:app` directly.
+Docker Compose runs Traefik (TLS via Let's Encrypt HTTP-01 challenge) in front of the Flask/gunicorn container. Docker image is based on `python:3.13-slim` with gunicorn as the WSGI server. Gunicorn uses the factory syntax `dyndns:create_app()` to create the app at worker startup.
 
 The `instance/` directory (SQLite databases) is persisted via a Docker named volume (`dyndns-data:/app/instance`). Use `scripts/backup.sh` to back up and restore these databases safely (WAL-mode safe, works while the app is running).
 
@@ -242,4 +242,4 @@ Expected delete response: `good` (record deleted) or `nochg` (record didn't exis
 - GHCR package visibility is independent of repo visibility
 - Query parameter authentication is supported but logs a warning — prefer HTTP Basic Auth
 - Gunicorn access log excludes query strings to prevent password leakage
-- CSRF protection enabled for all web forms; `/nic/update` is exempt (uses Basic Auth)
+- CSRF protection enabled for all web forms; `/nic/update` and `/nic/delete` are exempt (use Basic Auth)

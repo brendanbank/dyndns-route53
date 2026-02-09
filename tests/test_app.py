@@ -1,7 +1,8 @@
 import base64
 import bcrypt
+import pytest
 from tests.conftest import (
-    TEST_PASSWORD, ADMIN_PASSWORD, login_user_full,
+    TEST_PASSWORD, ADMIN_PASSWORD, login_user_full, _hash_password,
 )
 
 
@@ -397,3 +398,54 @@ class TestMiscRoutes:
         login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
         resp = client.get('/admin/help')
         assert resp.status_code == 200
+
+
+# ==============================================================================
+# Boot-time Admin Creation
+# ==============================================================================
+
+class TestBootAdminCreation:
+
+    def test_fails_without_admin_password(self, tmp_path, monkeypatch):
+        """App refuses to start when no admin exists and ADMIN_PASSWORD is not set."""
+        from tests.conftest import TestConfig
+        monkeypatch.delenv('ADMIN_PASSWORD', raising=False)
+        config = TestConfig(tmp_path)
+        config.TESTING = False  # enable boot-time admin check
+        from dyndns import create_app
+        with pytest.raises(RuntimeError, match='ADMIN_PASSWORD is not set'):
+            create_app(config_class=config)
+
+    def test_creates_admin_from_env(self, tmp_path, monkeypatch):
+        """App creates admin user on boot when ADMIN_PASSWORD is set."""
+        from tests.conftest import TestConfig
+        password_hash = _hash_password('bootpass')
+        monkeypatch.setenv('ADMIN_PASSWORD', password_hash)
+        config = TestConfig(tmp_path)
+        config.TESTING = False
+        from dyndns import create_app
+        application = create_app(config_class=config)
+        from models import User
+        with application.app_context():
+            admin = User.query.filter_by(role='admin').first()
+            assert admin is not None
+            assert admin.username == 'admin'
+            assert bcrypt.checkpw(b'bootpass', admin.password_hash.encode())
+
+    def test_skips_if_admin_exists(self, tmp_path, monkeypatch):
+        """App does not create a second admin if one already exists."""
+        from tests.conftest import TestConfig
+        password_hash = _hash_password('firstpass')
+        monkeypatch.setenv('ADMIN_PASSWORD', password_hash)
+        config = TestConfig(tmp_path)
+        config.TESTING = False
+        from dyndns import create_app
+        from models import User
+        # First boot — creates admin
+        create_app(config_class=config)
+        # Second boot — no ADMIN_PASSWORD needed, admin already exists
+        monkeypatch.delenv('ADMIN_PASSWORD', raising=False)
+        app2 = create_app(config_class=config)
+        with app2.app_context():
+            admins = User.query.filter_by(role='admin').all()
+            assert len(admins) == 1

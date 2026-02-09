@@ -158,7 +158,7 @@ jobs:
           echo '```bash' >> release-notes.md
           echo "cp compose.example.yaml compose.yaml" >> release-notes.md
           echo "cp .env.example .env" >> release-notes.md
-          echo "# Edit .env with your credentials and domain settings" >> release-notes.md
+          echo "# Edit .env — set SECRET_KEY, FERNET_KEY, ADMIN_PASSWORD, and domain settings" >> release-notes.md
           echo "docker compose up -d" >> release-notes.md
           echo '```' >> release-notes.md
           echo "" >> release-notes.md

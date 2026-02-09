@@ -16,12 +16,11 @@ Originally built because the OPNsense DynDNS plugin did not support AWS Route53.
 ```bash
 docker pull ghcr.io/brendanbank/dyndns-route53:latest
 cp compose.example.yaml compose.yaml
-cp .env.example .env   # edit with your SECRET_KEY, FERNET_KEY, and Traefik settings
+cp .env.example .env   # edit with your SECRET_KEY, FERNET_KEY, ADMIN_PASSWORD, and Traefik settings
 docker compose up -d
-docker compose exec web python3 init_db.py
 ```
 
-`init_db.py` creates the database and an initial admin user. If `ADMIN_PASSWORD` is not set in `.env`, a random password is generated and printed.
+The database and admin user are created automatically on first boot. `ADMIN_PASSWORD` must be set to a bcrypt hash in `.env` — generate one with `python3 getpwd.py`.
 
 ### Building from source
 
@@ -30,7 +29,6 @@ git clone git@github.com:brendanbank/dyndns-route53.git
 cd dyndns-route53
 cp .env.example .env   # edit with your credentials
 docker compose up --build
-docker compose exec web python3 init_db.py
 ```
 
 See [INSTALLING.md](INSTALLING.md) for full installation options (Docker, manual setup) and configuration reference.

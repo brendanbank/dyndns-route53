@@ -13,21 +13,19 @@ Supports multi-user operation with per-user domains, backend credentials (Fernet
 **Docker (pre-built image):**
 ```
 docker compose up -d
-docker compose exec web python3 init_db.py
 ```
-Pulls `ghcr.io/brendanbank/dyndns-route53:latest` from GHCR. Traefik handles TLS; serves on HTTPS (port 443 by default, configurable via `HTTPS_PORT`).
+Pulls `ghcr.io/brendanbank/dyndns-route53:latest` from GHCR. Traefik handles TLS; serves on HTTPS (port 443 by default, configurable via `HTTPS_PORT`). Database and admin user are created automatically on first boot.
 
 **Docker (local build):**
 ```
 docker compose up --build
-docker compose exec web python3 init_db.py
 ```
 
 **Local development:**
 ```
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python init_db.py
+cp .env.example .env   # edit with SECRET_KEY, FERNET_KEY, ADMIN_PASSWORD
 .venv/bin/python dyndns.py
 ```
 Runs Flask dev server on `0.0.0.0:8080`. Web UI at `http://localhost:8080/admin/login`.
@@ -112,10 +110,10 @@ Configured in `.env` (loaded via python-dotenv):
 **Required:**
 - `SECRET_KEY` — Flask session secret
 - `FERNET_KEY` — Fernet encryption key for backend credentials in database
+- `ADMIN_PASSWORD` — bcrypt-hashed password for the initial admin user (generate with `python3 getpwd.py`). Required on first boot when no admin exists; app will refuse to start without it.
 
 **Optional:**
-- `ADMIN_PASSWORD` — pre-hashed bcrypt password for initial admin (used by `init_db.py`)
-- `ADMIN_TOTP_SECRET` — base32 TOTP secret for initial admin (used by `init_db.py`; generate with `python3 -c "import pyotp; print(pyotp.random_base32())"`)
+- `ADMIN_TOTP_SECRET` — base32 TOTP secret for admin 2FA (generate with `python3 -c "import pyotp; print(pyotp.random_base32())"`)
 - `DEBUG=DEBUG` — verbose logging
 
 **Traefik:** `TRAEFIK_HOSTNAME`, `LETSENCRYPT_EMAIL`, `LETSENCRYPT_CASERVER`, `HTTP_PORT`, `HTTPS_PORT`

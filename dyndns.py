@@ -34,7 +34,7 @@ import re
 import os
 
 from config import Config
-from models import db, Event
+from models import db, User, Event
 from auth import login_manager, authenticate_dyndns_user
 from lib import log, AccountFactory
 
@@ -69,6 +69,30 @@ def create_app(config_class=None):
             db.session.commit()
         except Exception:
             db.session.rollback()
+
+        # Create admin user on first boot if none exists
+        if not app.config.get('TESTING'):
+            admin = User.query.filter_by(role='admin').first()
+            if not admin:
+                admin_password = os.environ.get('ADMIN_PASSWORD')
+                if not admin_password:
+                    raise RuntimeError(
+                        'No admin user exists and ADMIN_PASSWORD is not set. '
+                        'Set ADMIN_PASSWORD in .env to a bcrypt hash. '
+                        'Generate one with: python3 getpwd.py'
+                    )
+                admin = User(
+                    username='admin',
+                    password_hash=admin_password,
+                    role='admin',
+                    is_active=True,
+                )
+                admin_totp = os.environ.get('ADMIN_TOTP_SECRET')
+                if admin_totp:
+                    admin.set_totp_secret(admin_totp)
+                db.session.add(admin)
+                db.session.commit()
+                log.info('Admin user created from ADMIN_PASSWORD env var.')
 
     # Proxy fix for Traefik
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)

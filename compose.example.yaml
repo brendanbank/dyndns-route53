@@ -3,10 +3,9 @@
 # Usage:
 #   1. Copy this file:        cp compose.example.yaml compose.yaml
 #   2. Create your env file:  cp .env.example .env
-#   3. Edit .env with your SECRET_KEY and FERNET_KEY
+#   3. Edit .env with your SECRET_KEY, FERNET_KEY, and ADMIN_PASSWORD
 #   4. Start the service:     docker compose up -d
-#   5. Initialize the DB:     docker compose exec web python3 init_db.py
-#   6. Log in at https://${TRAEFIK_HOSTNAME}/admin/login
+#   5. Log in at https://${TRAEFIK_HOSTNAME}/admin/login
 #
 # Traefik handles TLS automatically via Let's Encrypt.
 # HTTP (port 80) redirects to HTTPS (port 443).

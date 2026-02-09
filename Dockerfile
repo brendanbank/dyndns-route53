@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY dyndns.py config.py models.py auth.py forms.py web_routes.py getpwd.py init_db.py migrate_env.py ./
+COPY dyndns.py config.py models.py auth.py forms.py web_routes.py getpwd.py migrate_env.py ./
 COPY lib/ lib/
 COPY templates/ templates/
 COPY static/ static/

@@ -9,17 +9,23 @@ The easiest way to run dyndns-route53 is with the pre-built Docker image and the
    ```bash
    cp compose.example.yaml compose.yaml
    cp .env.example .env
-   # Edit .env — at minimum set SECRET_KEY, FERNET_KEY, TRAEFIK_HOSTNAME, LETSENCRYPT_EMAIL
+   # Edit .env — at minimum set SECRET_KEY, FERNET_KEY, ADMIN_PASSWORD, TRAEFIK_HOSTNAME, LETSENCRYPT_EMAIL
+   ```
+   Generate the required values:
+   ```bash
+   # SECRET_KEY
+   python3 -c "import secrets; print(secrets.token_hex(32))"
+   # FERNET_KEY
+   python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   # ADMIN_PASSWORD (generates a random password and its bcrypt hash)
+   python3 getpwd.py
    ```
 3. Start the service:
    ```bash
    docker compose up -d
    ```
-4. Initialize the database and create the admin user:
-   ```bash
-   docker compose exec web python3 init_db.py
-   ```
-   If `ADMIN_PASSWORD` is not set in `.env`, a random password is generated and printed. Save it.
+
+The database and admin user are created automatically on first boot. If `ADMIN_PASSWORD` is not set, the container will fail to start with an error message.
 
 Traefik handles TLS termination via Let's Encrypt. HTTP (port 80) redirects to HTTPS (port 443) automatically.
 
@@ -32,7 +38,6 @@ git clone git@github.com:brendanbank/dyndns-route53.git
 cd dyndns-route53
 cp .env.example .env   # edit with your settings
 docker compose up --build
-docker compose exec web python3 init_db.py
 ```
 
 ## Manual Installation
@@ -42,12 +47,7 @@ git clone git@github.com:brendanbank/dyndns-route53.git
 cd dyndns-route53
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-```
-
-Initialize the database:
-
-```bash
-.venv/bin/python init_db.py
+cp .env.example .env   # edit with your settings (SECRET_KEY, FERNET_KEY, ADMIN_PASSWORD)
 ```
 
 Run the development server:
@@ -61,7 +61,7 @@ The Flask dev server listens on `0.0.0.0:8080`. The web UI is at `http://localho
 ## First Login
 
 1. Open the web UI at `https://your-hostname/admin/login`
-2. Log in with `admin` and the password from `init_db.py`
+2. Log in with `admin` and the password you set via `ADMIN_PASSWORD`
 3. You will be prompted to set up TOTP two-factor authentication (scan QR code with an authenticator app)
 4. After 2FA setup, you'll be logged into the admin dashboard
 
@@ -75,13 +75,13 @@ All configuration is done through environment variables in a `.env` file. See [`
 |----------|-------------|
 | `SECRET_KEY` | Flask session secret (generate with `python3 -c "import secrets; print(secrets.token_hex(32))"`) |
 | `FERNET_KEY` | Encryption key for backend credentials (generate with `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`) |
+| `ADMIN_PASSWORD` | Bcrypt-hashed password for the initial admin user (generate with `python3 getpwd.py`) |
 
 ### Optional
 
 | Variable | Description |
 |----------|-------------|
-| `ADMIN_PASSWORD` | Pre-hashed bcrypt password for initial admin (used by `init_db.py`) |
-| `ADMIN_TOTP_SECRET` | Pre-shared TOTP secret for admin 2FA (used by `init_db.py`) |
+| `ADMIN_TOTP_SECRET` | Pre-shared TOTP secret for admin 2FA (generate with `python3 -c "import pyotp; print(pyotp.random_base32())"`) |
 | `DEBUG` | Set to `DEBUG` for verbose logging |
 
 ### Traefik Reverse Proxy

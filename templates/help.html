@@ -16,7 +16,7 @@
         <div id="collapseEndpoint" class="accordion-collapse collapse" data-bs-parent="#helpAccordion">
             <div class="accordion-body">
                 <p>This service implements the <strong>DynDNS v2 protocol</strong>. DNS records are updated via a single HTTP GET request:</p>
-                <pre class="bg-dark p-3 rounded"><code>GET /nic/update?hostname=&lt;FQDN&gt;&amp;myip=&lt;IP&gt;&amp;updatetype=&lt;backend&gt;</code></pre>
+                <pre class="bg-dark p-3 rounded"><code>GET /nic/update?hostname=&lt;FQDN&gt;&amp;myip=&lt;IP&gt;</code></pre>
 
                 <h5>Parameters</h5>
                 <div class="table-responsive">
@@ -25,10 +25,10 @@
                         <tbody>
                             <tr><td><code>hostname</code></td><td>Yes</td><td>Fully qualified domain name to update (e.g. <code>home.dyn.example.com</code>). Comma-separated for multiple.</td></tr>
                             <tr><td><code>myip</code></td><td>No</td><td>IP address to set. If omitted, the client's source IP is used.</td></tr>
-                            <tr><td><code>updatetype</code></td><td>No</td><td>Backend to use: <code>aws</code> (default) or <code>nsupdate</code>.</td></tr>
                         </tbody>
                     </table>
                 </div>
+                <p class="text-muted">The <code>updatetype</code> parameter is deprecated and ignored. All backends configured for the hostname's domain are updated automatically.</p>
 
                 <h5>Authentication</h5>
                 <p>Use <strong>HTTP Basic Auth</strong> with your DynDNS username and password. This is the recommended method.</p>
@@ -52,11 +52,11 @@
                     <table class="table table-sm">
                         <thead><tr><th>Code</th><th>Meaning</th></tr></thead>
                         <tbody>
-                            <tr><td><span class="badge bg-success">good</span></td><td>DNS record was created or updated successfully.</td></tr>
-                            <tr><td><span class="badge bg-info">nochg</span></td><td>IP address has not changed; no update performed.</td></tr>
+                            <tr><td><span class="badge bg-success">good</span></td><td>DNS record was created or updated successfully on at least one backend.</td></tr>
+                            <tr><td><span class="badge bg-info">nochg</span></td><td>IP address has not changed on any backend; no update performed.</td></tr>
                             <tr><td><span class="badge bg-danger">badauth</span></td><td>Invalid username or password.</td></tr>
                             <tr><td><span class="badge bg-danger">notfqdn</span></td><td>The hostname is not a valid fully qualified domain name.</td></tr>
-                            <tr><td><span class="badge bg-danger">nohost</span></td><td>The hostname does not match any domain assigned to your account.</td></tr>
+                            <tr><td><span class="badge bg-danger">nohost</span></td><td>The hostname is not registered to your account.</td></tr>
                             <tr><td><span class="badge bg-danger">dnserr</span></td><td>DNS backend returned an error while processing the update.</td></tr>
                             <tr><td><span class="badge bg-danger">911</span></td><td>Server-side error (missing credentials, invalid IP, or internal failure).</td></tr>
                         </tbody>
@@ -130,7 +130,8 @@ home.dyn.example.com</code></pre>
         <div id="collapseSelfService" class="accordion-collapse collapse" data-bs-parent="#helpAccordion">
             <div class="accordion-body">
                 <ul>
-                    <li><strong>Dashboard</strong> &mdash; View your assigned domains and recent DNS update events.</li>
+                    <li><strong>Dashboard</strong> &mdash; View your registered hostnames and recent DNS update events.</li>
+                    <li><strong>Hostnames</strong> &mdash; Register new hostnames under available domains, or remove existing ones.</li>
                     <li><strong>Events</strong> &mdash; Browse your full event history with filtering by hostname.</li>
                     <li><strong>Profile</strong> &mdash; Change your password. Click your username in the navigation bar.</li>
                 </ul>
@@ -152,13 +153,14 @@ home.dyn.example.com</code></pre>
                 <ul>
                     <li><strong>Create</strong> &mdash; Click "New User" and fill in username, password, role, and active status.</li>
                     <li><strong>Edit</strong> &mdash; Click a username to change their password, role, or active status. Leave the password field empty to keep the current password.</li>
+                    <li><strong>Hostnames</strong> &mdash; Click "Hostnames" to manage which hostnames a user can update.</li>
                     <li><strong>Activate / Deactivate</strong> &mdash; Uncheck "Active" to disable a user without deleting them. Deactivated users cannot log in or update DNS records.</li>
-                    <li><strong>Delete</strong> &mdash; Permanently removes the user and all their domain assignments. You cannot delete your own account.</li>
+                    <li><strong>Delete</strong> &mdash; Permanently removes the user and all their hostname registrations. You cannot delete your own account.</li>
                 </ul>
                 <h5>Roles</h5>
                 <ul>
-                    <li><strong>admin</strong> &mdash; Full access to all users, domains, credentials, and events.</li>
-                    <li><strong>user</strong> &mdash; Can update DNS records for assigned domains, view own events, and change own password.</li>
+                    <li><strong>admin</strong> &mdash; Full access to all users, domains, backends, credentials, and events.</li>
+                    <li><strong>user</strong> &mdash; Can register hostnames, update DNS records, view own events, and change own password.</li>
                 </ul>
             </div>
         </div>
@@ -173,13 +175,13 @@ home.dyn.example.com</code></pre>
         </h2>
         <div id="collapseDomains" class="accordion-collapse collapse" data-bs-parent="#helpAccordion">
             <div class="accordion-body">
-                <p>Domains are assigned per user from the user edit page. Click a username, then "Manage Domains".</p>
+                <p>Navigate to <strong>Domains</strong> in the navigation bar. Domains are global zones that users can register hostnames under.</p>
                 <ul>
-                    <li><strong>Add Domain</strong> &mdash; Enter the parent domain (e.g. <code>dyn.example.com</code>) and select a backend type. Users can then update any hostname under that domain (e.g. <code>home.dyn.example.com</code>).</li>
-                    <li><strong>Backend Type</strong> &mdash; Each domain assignment is tied to a specific backend (<code>aws</code> or <code>nsupdate</code>). The same domain can be assigned with different backends.</li>
-                    <li><strong>Delete</strong> &mdash; Removes the domain assignment and its associated backend credentials.</li>
+                    <li><strong>Add Domain</strong> &mdash; Enter the parent domain (e.g. <code>dyn.example.com</code>). Users can then register hostnames under it (e.g. <code>home.dyn.example.com</code>).</li>
+                    <li><strong>Backends</strong> &mdash; Each domain can have one or more backends (<code>aws</code>, <code>nsupdate</code>). When a hostname is updated, all backends for its domain are called.</li>
+                    <li><strong>Credentials</strong> &mdash; Configure backend credentials per domain via the "Configure" button. Credentials are shared across all users of that domain.</li>
+                    <li><strong>Delete</strong> &mdash; Removes the domain, all its backends, and all registered hostnames.</li>
                 </ul>
-                <p>A user can only update hostnames that fall under one of their assigned domains. If a hostname does not match, the server returns <code>nohost</code>.</p>
             </div>
         </div>
     </div>
@@ -193,7 +195,7 @@ home.dyn.example.com</code></pre>
         </h2>
         <div id="collapseCredentials" class="accordion-collapse collapse" data-bs-parent="#helpAccordion">
             <div class="accordion-body">
-                <p>Each domain assignment has its own set of backend credentials, configured via the "Config" button on the user's domain list.</p>
+                <p>Each domain backend has its own set of credentials, configured from the domain edit page.</p>
                 <p>Credentials are <strong>Fernet-encrypted</strong> at rest in the database. The encryption key is set via the <code>FERNET_KEY</code> environment variable. If this key is lost, all stored credentials become unrecoverable.</p>
 
                 <h5 class="mt-3">AWS Route53</h5>

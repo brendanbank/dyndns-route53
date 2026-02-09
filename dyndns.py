@@ -33,10 +33,13 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 import re
 import os
 
+import bcrypt as _bcrypt
+
 from config import Config
-from models import db, User, Event
+from models import db, User, Hostname, Event
 from auth import login_manager, authenticate_dyndns_user
 from lib import log, AccountFactory
+from lib.accounts import BaseAccount
 
 
 def create_app(config_class=None):
@@ -78,12 +81,18 @@ def create_app(config_class=None):
                 if not admin_password:
                     raise RuntimeError(
                         'No admin user exists and ADMIN_PASSWORD is not set. '
-                        'Set ADMIN_PASSWORD in .env to a bcrypt hash. '
-                        'Generate one with: python3 getpwd.py'
+                        'Set ADMIN_PASSWORD in .env (plaintext or bcrypt hash).'
                     )
+                # Accept plaintext or pre-hashed bcrypt passwords
+                if admin_password.startswith(('$2b$', '$2a$', '$2y$')):
+                    password_hash = admin_password
+                else:
+                    password_hash = _bcrypt.hashpw(
+                        admin_password.encode('utf8'), _bcrypt.gensalt()
+                    ).decode()
                 admin = User(
                     username='admin',
-                    password_hash=admin_password,
+                    password_hash=password_hash,
                     role='admin',
                     is_active=True,
                 )
@@ -143,18 +152,9 @@ def log_event(user, event_type, hostname=None, ip_address=None, backend_type=Non
         db.session.rollback()
 
 
-def find_user_domain(user, hostname, backend_type):
-    """Find the UserDomain that matches a hostname for a given backend type.
-    Returns the UserDomain whose domain_name is a suffix of hostname."""
-    best_match = None
-    for ud in user.domains:
-        if ud.backend_type != backend_type:
-            continue
-        if hostname.lower().endswith(ud.domain_name.lower()):
-            # Pick the longest matching domain (most specific)
-            if best_match is None or len(ud.domain_name) > len(best_match.domain_name):
-                best_match = ud
-    return best_match
+def find_hostname(user, hostname_str):
+    """Find a Hostname record owned by the user matching the exact hostname string."""
+    return Hostname.query.filter_by(name=hostname_str.lower(), user_id=user.id).first()
 
 
 @nic_update_bp.route("/nic/update")
@@ -186,7 +186,9 @@ def updateDydns():
         log.critical('invalid username or password')
         return httpReply("badauth")
 
-    updatetype = request.args.get("updatetype", default="aws")
+    updatetype = request.args.get("updatetype")
+    if updatetype:
+        log.warning(f'updatetype parameter is deprecated and ignored (was: {updatetype})')
 
     log.info(f'received request from {ip} to host: {request.host}  url: {url}')
 
@@ -196,70 +198,88 @@ def updateDydns():
 
     log.info(f'received request from user {username} for myip = {myip}, hostname = {hostnames}')
 
-    # Use a temporary account to validate IP and hostnames
-    temp_account = Accounts.get({"service": updatetype, "domains": [], "credentials": {}})
-    if not temp_account:
-        log.critical('invalid updatetype')
-        return httpReply("badauth")
-
-    validated_ip = temp_account.getip(myip)
+    # Validate IP and hostnames using BaseAccount static methods
+    validated_ip = BaseAccount.getip(myip)
     if not validated_ip:
         log.critical(f'invalid IP address {myip}')
         return httpReply("911")
 
-    ipType = temp_account.getiptype(validated_ip)
+    ipType = BaseAccount.getiptype(validated_ip)
     if not ipType:
         log.critical(f'invalid IP address {validated_ip}')
         return httpReply("911")
 
-    hostnamesObj = temp_account.isvalidhostname(hostnames)
+    hostnamesObj = BaseAccount.isvalidhostname(hostnames)
     if not hostnamesObj:
         log.critical(f'invalid hostname {hostnames}')
         return httpReply("notfqdn")
 
-    # Process each hostname against its own domain + credentials
+    # Process each hostname against all its domain backends
     lines = []
     for hostname in hostnamesObj:
-        ud = find_user_domain(user, hostname, updatetype)
-        if not ud:
-            log.warning(f'hostname {hostname} does not match any domain for user {username} backend {updatetype}')
+        hn = find_hostname(user, hostname)
+        if not hn:
+            log.warning(f'hostname {hostname} not registered for user {username}')
             lines.append(f"nohost {validated_ip}")
             log_event(user, 'dns_update', hostname=hostname, ip_address=str(validated_ip),
-                      backend_type=updatetype, response='nohost')
+                      backend_type=None, response='nohost')
             continue
 
-        creds = ud.get_credentials()
-        if not creds:
-            log.warning(f'no credentials for domain {ud.domain_name} backend {updatetype} user {username}')
+        domain = hn.domain
+        backends = domain.backends
+
+        if not backends:
+            log.warning(f'no backends configured for domain {domain.name}')
             lines.append(f"911 {validated_ip}")
             log_event(user, 'dns_update', hostname=hostname, ip_address=str(validated_ip),
-                      backend_type=updatetype, response='911')
+                      backend_type=None, response='911')
             continue
 
-        account_dict = {
-            "service": updatetype,
-            "domains": [ud.domain_name],
-            "credentials": creds,
-        }
-        account = Accounts.get(account_dict)
-        if not account:
-            lines.append(f"911 {validated_ip}")
+        # Try all backends for this hostname's domain
+        results = []
+        for db_backend in backends:
+            creds = db_backend.get_credentials()
+            if not creds:
+                log.warning(f'no credentials for domain {domain.name} backend {db_backend.backend_type}')
+                log_event(user, 'dns_update', hostname=hostname, ip_address=str(validated_ip),
+                          backend_type=db_backend.backend_type, response='911')
+                results.append('911')
+                continue
+
+            account_dict = {
+                "service": db_backend.backend_type,
+                "domains": [domain.name],
+                "credentials": creds,
+            }
+            account = Accounts.get(account_dict)
+            if not account:
+                log_event(user, 'dns_update', hostname=hostname, ip_address=str(validated_ip),
+                          backend_type=db_backend.backend_type, response='911')
+                results.append('911')
+                continue
+
+            hostname_zones = account.hostnameperzone([hostname])
+            if not hostname_zones:
+                log_event(user, 'dns_update', hostname=hostname, ip_address=str(validated_ip),
+                          backend_type=db_backend.backend_type, response='nohost')
+                results.append('nohost')
+                continue
+
+            update_results = account.createrecords(str(validated_ip), hostname_zones, rtype=ipType)
+            status = update_results.get(hostname, "dnserr") if update_results else "dnserr"
             log_event(user, 'dns_update', hostname=hostname, ip_address=str(validated_ip),
-                      backend_type=updatetype, response='911')
-            continue
+                      backend_type=db_backend.backend_type, response=status)
+            results.append(status)
 
-        hostname_zones = account.hostnameperzone([hostname])
-        if not hostname_zones:
-            lines.append(f"nohost {validated_ip}")
-            log_event(user, 'dns_update', hostname=hostname, ip_address=str(validated_ip),
-                      backend_type=updatetype, response='nohost')
-            continue
-
-        results = account.createrecords(str(validated_ip), hostname_zones, rtype=ipType)
-        status = results.get(hostname, "dnserr") if results else "dnserr"
-        lines.append(f"{status} {validated_ip}")
-        log_event(user, 'dns_update', hostname=hostname, ip_address=str(validated_ip),
-                  backend_type=updatetype, response=status)
+        # Aggregate: good if any good, nochg if all nochg, else first error
+        if 'good' in results:
+            lines.append(f"good {validated_ip}")
+        elif all(r == 'nochg' for r in results):
+            lines.append(f"nochg {validated_ip}")
+        else:
+            # Return the first non-nochg status
+            error_status = next((r for r in results if r not in ('good', 'nochg')), 'dnserr')
+            lines.append(f"{error_status} {validated_ip}")
 
     return httpReply("\n".join(lines))
 

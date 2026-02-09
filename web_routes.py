@@ -5,8 +5,8 @@ import qrcode
 import qrcode.image.svg
 from flask import Blueprint, render_template, redirect, url_for, flash, request, session
 from flask_login import login_user, logout_user, login_required, current_user
-from models import db, User, UserDomain, BackendConfig, Event, encrypt_value, decrypt_value
-from forms import LoginForm, UserForm, PasswordChangeForm, TOTPVerifyForm, TOTPSetupForm
+from models import db, User, Domain, DomainBackend, BackendConfig, Hostname, Event, encrypt_value, decrypt_value
+from forms import LoginForm, UserForm, PasswordChangeForm, TOTPVerifyForm, TOTPSetupForm, DomainForm, HostnameForm
 from auth import admin_required, authenticate_dyndns_user
 
 web_bp = Blueprint('web', __name__)
@@ -144,15 +144,17 @@ def totp_setup():
 def dashboard():
     if current_user.is_admin:
         user_count = User.query.count()
-        domain_count = UserDomain.query.distinct(UserDomain.domain_name).count()
+        domain_count = Domain.query.count()
+        hostname_count = Hostname.query.count()
         event_count = Event.query.count()
         recent_events = Event.query.order_by(Event.created_at.desc()).limit(10).all()
         return render_template('dashboard.html', user_count=user_count, domain_count=domain_count,
-                               event_count=event_count, recent_events=recent_events)
+                               hostname_count=hostname_count, event_count=event_count,
+                               recent_events=recent_events)
     else:
-        user_domains = UserDomain.query.filter_by(user_id=current_user.id).all()
+        user_hostnames = Hostname.query.filter_by(user_id=current_user.id).all()
         recent_events = Event.query.filter_by(user_id=current_user.id).order_by(Event.created_at.desc()).limit(10).all()
-        return render_template('dashboard.html', user_domains=user_domains, recent_events=recent_events)
+        return render_template('dashboard.html', user_hostnames=user_hostnames, recent_events=recent_events)
 
 
 # --- User Management (Admin) ---
@@ -214,63 +216,98 @@ def user_delete(user_id):
     return redirect(url_for('web.user_list'))
 
 
-# --- User Domain Management (Admin) ---
+# --- Domain Management (Admin) ---
 
-@web_bp.route('/admin/users/<int:user_id>/domains', methods=['GET', 'POST'])
+@web_bp.route('/admin/domains', methods=['GET', 'POST'])
 @login_required
 @admin_required
-def user_domains(user_id):
-    user = User.query.get_or_404(user_id)
+def domain_list():
+    form = DomainForm()
+    if form.validate_on_submit():
+        name = form.name.data.strip().lower()
+        existing = Domain.query.filter_by(name=name).first()
+        if existing:
+            flash(f'Domain "{name}" already exists.', 'warning')
+        else:
+            domain = Domain(name=name)
+            db.session.add(domain)
+            db.session.commit()
+            flash(f'Domain "{name}" created.', 'success')
+        return redirect(url_for('web.domain_list'))
+    domains = Domain.query.order_by(Domain.name).all()
+    return render_template('domains/list.html', domains=domains, form=form)
+
+
+@web_bp.route('/admin/domains/<int:domain_id>', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def domain_edit(domain_id):
+    domain = Domain.query.get_or_404(domain_id)
+    form = DomainForm(obj=domain)
+    if form.validate_on_submit():
+        new_name = form.name.data.strip().lower()
+        if new_name != domain.name:
+            existing = Domain.query.filter_by(name=new_name).first()
+            if existing:
+                flash(f'Domain "{new_name}" already exists.', 'warning')
+                return redirect(url_for('web.domain_edit', domain_id=domain.id))
+        domain.name = new_name
+        db.session.commit()
+        flash(f'Domain "{domain.name}" updated.', 'success')
+        return redirect(url_for('web.domain_edit', domain_id=domain.id))
+    return render_template('domains/edit.html', domain=domain, form=form)
+
+
+@web_bp.route('/admin/domains/<int:domain_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def domain_delete(domain_id):
+    domain = Domain.query.get_or_404(domain_id)
+    name = domain.name
+    db.session.delete(domain)
+    db.session.commit()
+    flash(f'Domain "{name}" deleted.', 'success')
+    return redirect(url_for('web.domain_list'))
+
+
+# --- Domain Backend Management (Admin) ---
+
+@web_bp.route('/admin/domains/<int:domain_id>/backends/new', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def domain_backend_add(domain_id):
+    domain = Domain.query.get_or_404(domain_id)
     if request.method == 'POST':
-        domain_name = request.form.get('domain_name', '').strip().lower()
-        backend_type = request.form.get('backend_type', 'aws')
-        if not domain_name:
-            flash('Domain name is required.', 'danger')
-        elif backend_type not in BACKEND_CONFIG_KEYS:
+        backend_type = request.form.get('backend_type', '').strip()
+        if backend_type not in BACKEND_CONFIG_KEYS:
             flash('Invalid backend type.', 'danger')
         else:
-            existing = UserDomain.query.filter_by(
-                user_id=user.id, domain_name=domain_name, backend_type=backend_type).first()
+            existing = DomainBackend.query.filter_by(domain_id=domain.id, backend_type=backend_type).first()
             if existing:
-                flash(f'"{domain_name}" with backend "{backend_type}" already exists.', 'warning')
+                flash(f'Backend "{backend_type}" already exists for this domain.', 'warning')
             else:
-                ud = UserDomain(user_id=user.id, domain_name=domain_name, backend_type=backend_type)
-                db.session.add(ud)
+                db_backend = DomainBackend(domain_id=domain.id, backend_type=backend_type)
+                db.session.add(db_backend)
                 db.session.commit()
-                flash(f'Domain "{domain_name}" ({backend_type}) added.', 'success')
-        return redirect(url_for('web.user_domains', user_id=user.id))
-
-    user_domain_list = UserDomain.query.filter_by(user_id=user.id).order_by(
-        UserDomain.domain_name, UserDomain.backend_type).all()
-    return render_template('users/domains.html', user=user, user_domains=user_domain_list)
+                flash(f'Backend "{backend_type}" added.', 'success')
+                return redirect(url_for('web.domain_backend_config', domain_id=domain.id, db_id=db_backend.id))
+        return redirect(url_for('web.domain_edit', domain_id=domain.id))
+    return render_template('domains/backend_add.html', domain=domain, backend_types=BACKEND_CONFIG_KEYS.keys())
 
 
-@web_bp.route('/admin/users/<int:user_id>/domains/<int:ud_id>/delete', methods=['POST'])
+@web_bp.route('/admin/domains/<int:domain_id>/backends/<int:db_id>/config', methods=['GET', 'POST'])
 @login_required
 @admin_required
-def user_domain_delete(user_id, ud_id):
-    ud = UserDomain.query.get_or_404(ud_id)
-    db.session.delete(ud)
-    db.session.commit()
-    flash('Domain removed.', 'success')
-    return redirect(url_for('web.user_domains', user_id=user_id))
+def domain_backend_config(domain_id, db_id):
+    domain = Domain.query.get_or_404(domain_id)
+    db_backend = DomainBackend.query.get_or_404(db_id)
 
-
-# --- Backend Config per Domain (Admin) ---
-
-@web_bp.route('/admin/users/<int:user_id>/domains/<int:ud_id>/config', methods=['GET', 'POST'])
-@login_required
-@admin_required
-def domain_backend_config(user_id, ud_id):
-    ud = UserDomain.query.get_or_404(ud_id)
-    user = User.query.get_or_404(user_id)
-
-    config_keys = BACKEND_CONFIG_KEYS.get(ud.backend_type)
+    config_keys = BACKEND_CONFIG_KEYS.get(db_backend.backend_type)
     if not config_keys:
         flash('Invalid backend type.', 'danger')
-        return redirect(url_for('web.user_domains', user_id=user_id))
+        return redirect(url_for('web.domain_edit', domain_id=domain.id))
 
-    existing = {c.config_key: c for c in ud.configs}
+    existing = {c.config_key: c for c in db_backend.configs}
 
     if request.method == 'POST':
         for key, label in config_keys:
@@ -279,14 +316,14 @@ def domain_backend_config(user_id, ud_id):
                 if key in existing:
                     existing[key].config_value = encrypt_value(value)
                 else:
-                    cfg = BackendConfig(user_domain_id=ud.id,
+                    cfg = BackendConfig(domain_backend_id=db_backend.id,
                                         config_key=key, config_value=encrypt_value(value))
                     db.session.add(cfg)
             elif key in existing:
                 db.session.delete(existing[key])
         db.session.commit()
-        flash(f'Credentials for "{ud.domain_name}" ({ud.backend_type}) updated.', 'success')
-        return redirect(url_for('web.domain_backend_config', user_id=user_id, ud_id=ud_id))
+        flash(f'Credentials for "{domain.name}" ({db_backend.backend_type}) updated.', 'success')
+        return redirect(url_for('web.domain_backend_config', domain_id=domain.id, db_id=db_backend.id))
 
     current_values = {}
     for key, label in config_keys:
@@ -298,8 +335,102 @@ def domain_backend_config(user_id, ud_id):
         else:
             current_values[key] = ''
 
-    return render_template('backends/edit.html', user=user, ud=ud,
+    return render_template('domains/backend_config.html', domain=domain, db_backend=db_backend,
                            config_keys=config_keys, current_values=current_values)
+
+
+@web_bp.route('/admin/domains/<int:domain_id>/backends/<int:db_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def domain_backend_delete(domain_id, db_id):
+    db_backend = DomainBackend.query.get_or_404(db_id)
+    db.session.delete(db_backend)
+    db.session.commit()
+    flash('Backend removed.', 'success')
+    return redirect(url_for('web.domain_edit', domain_id=domain_id))
+
+
+# --- Hostname Management (Admin) ---
+
+@web_bp.route('/admin/users/<int:user_id>/hostnames', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def user_hostnames(user_id):
+    user = User.query.get_or_404(user_id)
+    form = HostnameForm()
+    form.domain_id.choices = [(d.id, d.name) for d in Domain.query.order_by(Domain.name).all()]
+
+    if form.validate_on_submit():
+        domain = Domain.query.get(form.domain_id.data)
+        if not domain:
+            flash('Invalid domain.', 'danger')
+        else:
+            fqdn = f'{form.prefix.data.strip().lower()}.{domain.name}'
+            existing = Hostname.query.filter_by(name=fqdn).first()
+            if existing:
+                flash(f'Hostname "{fqdn}" is already registered.', 'warning')
+            else:
+                hn = Hostname(name=fqdn, domain_id=domain.id, user_id=user.id)
+                db.session.add(hn)
+                db.session.commit()
+                flash(f'Hostname "{fqdn}" added.', 'success')
+            return redirect(url_for('web.user_hostnames', user_id=user.id))
+
+    hostnames = Hostname.query.filter_by(user_id=user.id).order_by(Hostname.name).all()
+    return render_template('hostnames/list.html', user=user, hostnames=hostnames, form=form, is_admin_view=True)
+
+
+@web_bp.route('/admin/users/<int:user_id>/hostnames/<int:hn_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def user_hostname_delete(user_id, hn_id):
+    hn = Hostname.query.get_or_404(hn_id)
+    db.session.delete(hn)
+    db.session.commit()
+    flash('Hostname removed.', 'success')
+    return redirect(url_for('web.user_hostnames', user_id=user_id))
+
+
+# --- Hostname Management (User self-service) ---
+
+@web_bp.route('/admin/hostnames', methods=['GET', 'POST'])
+@login_required
+def my_hostnames():
+    form = HostnameForm()
+    form.domain_id.choices = [(d.id, d.name) for d in Domain.query.order_by(Domain.name).all()]
+
+    if form.validate_on_submit():
+        domain = Domain.query.get(form.domain_id.data)
+        if not domain:
+            flash('Invalid domain.', 'danger')
+        else:
+            fqdn = f'{form.prefix.data.strip().lower()}.{domain.name}'
+            existing = Hostname.query.filter_by(name=fqdn).first()
+            if existing:
+                flash(f'Hostname "{fqdn}" is already registered.', 'warning')
+            else:
+                hn = Hostname(name=fqdn, domain_id=domain.id, user_id=current_user.id)
+                db.session.add(hn)
+                db.session.commit()
+                flash(f'Hostname "{fqdn}" added.', 'success')
+            return redirect(url_for('web.my_hostnames'))
+
+    hostnames = Hostname.query.filter_by(user_id=current_user.id).order_by(Hostname.name).all()
+    return render_template('hostnames/list.html', user=current_user, hostnames=hostnames, form=form,
+                           is_admin_view=False)
+
+
+@web_bp.route('/admin/hostnames/<int:hn_id>/delete', methods=['POST'])
+@login_required
+def my_hostname_delete(hn_id):
+    hn = Hostname.query.get_or_404(hn_id)
+    if hn.user_id != current_user.id and not current_user.is_admin:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('web.my_hostnames'))
+    db.session.delete(hn)
+    db.session.commit()
+    flash('Hostname removed.', 'success')
+    return redirect(url_for('web.my_hostnames'))
 
 
 # --- Events ---
@@ -340,8 +471,8 @@ def profile():
             db.session.commit()
             flash('Password changed successfully.', 'success')
             return redirect(url_for('web.profile'))
-    user_domains = UserDomain.query.filter_by(user_id=current_user.id).all()
-    return render_template('profile.html', form=form, user_domains=user_domains,
+    user_hostnames = Hostname.query.filter_by(user_id=current_user.id).all()
+    return render_template('profile.html', form=form, user_hostnames=user_hostnames,
                            has_totp=current_user.has_totp)
 
 

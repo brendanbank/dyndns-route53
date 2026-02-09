@@ -46,3 +46,14 @@ class TOTPVerifyForm(FlaskForm):
 class TOTPSetupForm(FlaskForm):
     code = StringField('Verification Code', validators=[DataRequired(), Length(min=6, max=6)])
     submit = SubmitField('Enable 2FA')
+
+
+class DomainForm(FlaskForm):
+    name = StringField('Domain Name', validators=[DataRequired(), Length(max=255)])
+    submit = SubmitField('Save')
+
+
+class HostnameForm(FlaskForm):
+    prefix = StringField('Hostname Prefix', validators=[DataRequired(), Length(max=255)])
+    domain_id = SelectField('Domain', coerce=int, validators=[DataRequired()])
+    submit = SubmitField('Add Hostname')

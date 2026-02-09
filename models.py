@@ -36,7 +36,7 @@ class User(UserMixin, db.Model):
 
     totp_secret = db.Column(db.Text, nullable=True)
 
-    domains = db.relationship('UserDomain', back_populates='user', cascade='all, delete-orphan')
+    hostnames = db.relationship('Hostname', back_populates='user', cascade='all, delete-orphan')
 
     @property
     def is_admin(self):
@@ -58,18 +58,28 @@ class User(UserMixin, db.Model):
             self.totp_secret = encrypt_value(secret)
 
 
-class UserDomain(db.Model):
-    __tablename__ = 'user_domains'
+class Domain(db.Model):
+    __tablename__ = 'domains'
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
-    domain_name = db.Column(db.String(255), nullable=False)
-    backend_type = db.Column(db.String(20), nullable=False, default='aws')
+    name = db.Column(db.String(255), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
-    user = db.relationship('User', back_populates='domains')
-    configs = db.relationship('BackendConfig', back_populates='user_domain', cascade='all, delete-orphan')
+    backends = db.relationship('DomainBackend', back_populates='domain', cascade='all, delete-orphan')
+    hostnames = db.relationship('Hostname', back_populates='domain', cascade='all, delete-orphan')
 
-    __table_args__ = (db.UniqueConstraint('user_id', 'domain_name', 'backend_type'),)
+
+class DomainBackend(db.Model):
+    __tablename__ = 'domain_backends'
+
+    id = db.Column(db.Integer, primary_key=True)
+    domain_id = db.Column(db.Integer, db.ForeignKey('domains.id', ondelete='CASCADE'), nullable=False)
+    backend_type = db.Column(db.String(20), nullable=False)
+
+    domain = db.relationship('Domain', back_populates='backends')
+    configs = db.relationship('BackendConfig', back_populates='domain_backend', cascade='all, delete-orphan')
+
+    __table_args__ = (db.UniqueConstraint('domain_id', 'backend_type'),)
 
     def get_credentials(self):
         creds = {}
@@ -82,17 +92,30 @@ class UserDomain(db.Model):
         return len(self.configs) > 0
 
 
+class Hostname(db.Model):
+    __tablename__ = 'hostnames'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), unique=True, nullable=False)
+    domain_id = db.Column(db.Integer, db.ForeignKey('domains.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    domain = db.relationship('Domain', back_populates='hostnames')
+    user = db.relationship('User', back_populates='hostnames')
+
+
 class BackendConfig(db.Model):
     __tablename__ = 'backend_configs'
 
     id = db.Column(db.Integer, primary_key=True)
-    user_domain_id = db.Column(db.Integer, db.ForeignKey('user_domains.id', ondelete='CASCADE'), nullable=False)
+    domain_backend_id = db.Column(db.Integer, db.ForeignKey('domain_backends.id', ondelete='CASCADE'), nullable=False)
     config_key = db.Column(db.String(80), nullable=False)
     config_value = db.Column(db.Text, nullable=False)
 
-    user_domain = db.relationship('UserDomain', back_populates='configs')
+    domain_backend = db.relationship('DomainBackend', back_populates='configs')
 
-    __table_args__ = (db.UniqueConstraint('user_domain_id', 'config_key'),)
+    __table_args__ = (db.UniqueConstraint('domain_backend_id', 'config_key'),)
 
 
 class Event(db.Model):

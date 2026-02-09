@@ -25,6 +25,13 @@
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('web.user_list') }}">Users</a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('web.domain_list') }}">Domains</a>
+                    </li>
+                    {% else %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('web.my_hostnames') }}">Hostnames</a>
+                    </li>
                     {% endif %}
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('web.event_list') }}">Events</a>

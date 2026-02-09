@@ -133,6 +133,17 @@ class TestAuthorization:
         resp = client.get('/admin/profile')
         assert resp.status_code == 200
 
+    def test_regular_user_cannot_access_domains(self, client, regular_user, regular_user_with_totp):
+        login_user_full(client, 'testuser', TEST_PASSWORD, totp_secret=regular_user_with_totp)
+        resp = client.get('/admin/domains', follow_redirects=False)
+        assert resp.status_code == 302
+        assert 'login' in resp.headers['Location']
+
+    def test_regular_user_can_access_hostnames(self, client, regular_user, regular_user_with_totp):
+        login_user_full(client, 'testuser', TEST_PASSWORD, totp_secret=regular_user_with_totp)
+        resp = client.get('/admin/hostnames')
+        assert resp.status_code == 200
+
 
 # ==============================================================================
 # User Management (Admin)
@@ -282,7 +293,7 @@ class TestDynDNSAPI:
         resp = client.get('/nic/update?myip=1.2.3.4', headers=headers)
         assert b'911' in resp.data
 
-    def test_no_matching_domain_returns_nohost(self, client, admin_user):
+    def test_no_matching_hostname_returns_nohost(self, client, admin_user):
         headers = self._basic_auth_header('admin', ADMIN_PASSWORD)
         resp = client.get('/nic/update?hostname=test.example.com&myip=1.2.3.4', headers=headers)
         assert b'nohost' in resp.data
@@ -297,7 +308,7 @@ class TestDynDNSAPI:
             f'/nic/update?username=admin&password={ADMIN_PASSWORD}'
             f'&hostname=test.example.com&myip=1.2.3.4'
         )
-        # Should authenticate successfully — nohost because no domain assigned
+        # Should authenticate successfully — nohost because no hostname registered
         assert b'nohost' in resp.data
 
     def test_inactive_user_badauth(self, client, inactive_user):
@@ -309,8 +320,21 @@ class TestDynDNSAPI:
         """DynDNS API uses HTTP Basic Auth only — no TOTP needed."""
         headers = self._basic_auth_header('admin', ADMIN_PASSWORD)
         resp = client.get('/nic/update?hostname=test.example.com&myip=1.2.3.4', headers=headers)
-        # Should get through auth (nohost because no domain assigned, not badauth)
+        # Should get through auth (nohost because no hostname registered, not badauth)
         assert b'badauth' not in resp.data
+
+    def test_registered_hostname_no_backend_returns_911(self, client, regular_user, test_domain, test_hostname):
+        """Hostname exists but domain has no backends -> 911."""
+        headers = self._basic_auth_header('testuser', TEST_PASSWORD)
+        resp = client.get('/nic/update?hostname=test.example.com&myip=1.2.3.4', headers=headers)
+        assert b'911' in resp.data
+
+    def test_updatetype_param_ignored(self, client, admin_user):
+        """updatetype parameter is accepted but ignored."""
+        headers = self._basic_auth_header('admin', ADMIN_PASSWORD)
+        resp = client.get('/nic/update?hostname=test.example.com&myip=1.2.3.4&updatetype=nsupdate', headers=headers)
+        # Should still get nohost (no hostname registered), not an error about bad updatetype
+        assert b'nohost' in resp.data
 
 
 # ==============================================================================
@@ -343,35 +367,148 @@ class TestDomainManagement:
     def _login_admin(self, client, admin_user, admin_with_totp):
         login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
 
-    def test_add_domain_to_user(self, client, admin_user, admin_with_totp, regular_user):
+    def test_domain_list_page_loads(self, client, admin_user, admin_with_totp):
         self._login_admin(client, admin_user, admin_with_totp)
-        resp = client.post(f'/admin/users/{regular_user}/domains', data={
-            'domain_name': 'example.com',
-            'backend_type': 'aws',
+        resp = client.get('/admin/domains')
+        assert resp.status_code == 200
+
+    def test_create_domain(self, client, admin_user, admin_with_totp, app):
+        self._login_admin(client, admin_user, admin_with_totp)
+        resp = client.post('/admin/domains', data={
+            'name': 'dyn.example.com',
         }, follow_redirects=True)
         assert resp.status_code == 200
-        assert b'example.com' in resp.data
+        assert b'dyn.example.com' in resp.data
+        from models import Domain
+        with app.app_context():
+            d = Domain.query.filter_by(name='dyn.example.com').first()
+            assert d is not None
 
-    def test_duplicate_domain_rejected(self, client, admin_user, admin_with_totp, regular_user):
+    def test_duplicate_domain_rejected(self, client, admin_user, admin_with_totp, test_domain):
         self._login_admin(client, admin_user, admin_with_totp)
-        client.post(f'/admin/users/{regular_user}/domains', data={
-            'domain_name': 'example.com', 'backend_type': 'aws',
-        })
-        resp = client.post(f'/admin/users/{regular_user}/domains', data={
-            'domain_name': 'example.com', 'backend_type': 'aws',
+        resp = client.post('/admin/domains', data={
+            'name': 'example.com',
         }, follow_redirects=True)
         assert b'already exists' in resp.data.lower()
 
-    def test_delete_domain(self, client, admin_user, admin_with_totp, regular_user, app):
+    def test_edit_domain(self, client, admin_user, admin_with_totp, test_domain):
         self._login_admin(client, admin_user, admin_with_totp)
-        client.post(f'/admin/users/{regular_user}/domains', data={
-            'domain_name': 'todelete.com', 'backend_type': 'aws',
-        })
-        from models import UserDomain
+        resp = client.post(f'/admin/domains/{test_domain}', data={
+            'name': 'updated.example.com',
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        assert b'updated' in resp.data.lower()
+
+    def test_delete_domain(self, client, admin_user, admin_with_totp, test_domain):
+        self._login_admin(client, admin_user, admin_with_totp)
+        resp = client.post(f'/admin/domains/{test_domain}/delete', follow_redirects=True)
+        assert b'deleted' in resp.data.lower()
+
+    def test_add_backend_to_domain(self, client, admin_user, admin_with_totp, test_domain, app):
+        self._login_admin(client, admin_user, admin_with_totp)
+        resp = client.post(f'/admin/domains/{test_domain}/backends/new', data={
+            'backend_type': 'aws',
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        from models import DomainBackend
         with app.app_context():
-            ud = UserDomain.query.filter_by(user_id=regular_user, domain_name='todelete.com').first()
-            ud_id = ud.id
-        resp = client.post(f'/admin/users/{regular_user}/domains/{ud_id}/delete', follow_redirects=True)
+            b = DomainBackend.query.filter_by(domain_id=test_domain, backend_type='aws').first()
+            assert b is not None
+
+    def test_duplicate_backend_rejected(self, client, admin_user, admin_with_totp, test_domain, test_domain_with_backend):
+        self._login_admin(client, admin_user, admin_with_totp)
+        resp = client.post(f'/admin/domains/{test_domain}/backends/new', data={
+            'backend_type': 'aws',
+        }, follow_redirects=True)
+        assert b'already exists' in resp.data.lower()
+
+    def test_delete_backend(self, client, admin_user, admin_with_totp, test_domain, test_domain_with_backend):
+        self._login_admin(client, admin_user, admin_with_totp)
+        resp = client.post(f'/admin/domains/{test_domain}/backends/{test_domain_with_backend}/delete',
+                           follow_redirects=True)
+        assert b'removed' in resp.data.lower()
+
+    def test_backend_config_page_loads(self, client, admin_user, admin_with_totp, test_domain, test_domain_with_backend):
+        self._login_admin(client, admin_user, admin_with_totp)
+        resp = client.get(f'/admin/domains/{test_domain}/backends/{test_domain_with_backend}/config')
+        assert resp.status_code == 200
+        assert b'AWS Access Key ID' in resp.data
+
+    def test_save_backend_credentials(self, client, admin_user, admin_with_totp, test_domain, test_domain_with_backend, app):
+        self._login_admin(client, admin_user, admin_with_totp)
+        resp = client.post(f'/admin/domains/{test_domain}/backends/{test_domain_with_backend}/config', data={
+            'aws_access_key_id': 'AKIAIOSFODNN7EXAMPLE',
+            'aws_secret_access_key': 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+        }, follow_redirects=True)
+        assert b'updated' in resp.data.lower()
+        from models import BackendConfig
+        with app.app_context():
+            configs = BackendConfig.query.filter_by(domain_backend_id=test_domain_with_backend).all()
+            assert len(configs) == 2
+
+
+# ==============================================================================
+# Hostname Management
+# ==============================================================================
+
+class TestHostnameManagement:
+
+    def _login_admin(self, client, admin_user, admin_with_totp):
+        login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
+
+    def test_admin_hostname_page_loads(self, client, admin_user, admin_with_totp, regular_user):
+        self._login_admin(client, admin_user, admin_with_totp)
+        resp = client.get(f'/admin/users/{regular_user}/hostnames')
+        assert resp.status_code == 200
+
+    def test_admin_add_hostname(self, client, admin_user, admin_with_totp, regular_user, test_domain, app):
+        self._login_admin(client, admin_user, admin_with_totp)
+        resp = client.post(f'/admin/users/{regular_user}/hostnames', data={
+            'prefix': 'myhost',
+            'domain_id': test_domain,
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        assert b'myhost.example.com' in resp.data
+        from models import Hostname
+        with app.app_context():
+            hn = Hostname.query.filter_by(name='myhost.example.com').first()
+            assert hn is not None
+            assert hn.user_id == regular_user
+
+    def test_admin_delete_hostname(self, client, admin_user, admin_with_totp, regular_user, test_hostname):
+        self._login_admin(client, admin_user, admin_with_totp)
+        resp = client.post(f'/admin/users/{regular_user}/hostnames/{test_hostname}/delete', follow_redirects=True)
+        assert b'removed' in resp.data.lower()
+
+    def test_duplicate_hostname_rejected(self, client, admin_user, admin_with_totp, regular_user, test_domain, test_hostname):
+        self._login_admin(client, admin_user, admin_with_totp)
+        resp = client.post(f'/admin/users/{regular_user}/hostnames', data={
+            'prefix': 'test',
+            'domain_id': test_domain,
+        }, follow_redirects=True)
+        assert b'already registered' in resp.data.lower()
+
+    def test_user_self_service_hostnames(self, client, regular_user, regular_user_with_totp, test_domain):
+        login_user_full(client, 'testuser', TEST_PASSWORD, totp_secret=regular_user_with_totp)
+        resp = client.get('/admin/hostnames')
+        assert resp.status_code == 200
+
+    def test_user_add_own_hostname(self, client, regular_user, regular_user_with_totp, test_domain, app):
+        login_user_full(client, 'testuser', TEST_PASSWORD, totp_secret=regular_user_with_totp)
+        resp = client.post('/admin/hostnames', data={
+            'prefix': 'userhost',
+            'domain_id': test_domain,
+        }, follow_redirects=True)
+        assert b'userhost.example.com' in resp.data
+        from models import Hostname
+        with app.app_context():
+            hn = Hostname.query.filter_by(name='userhost.example.com').first()
+            assert hn is not None
+            assert hn.user_id == regular_user
+
+    def test_user_delete_own_hostname(self, client, regular_user, regular_user_with_totp, test_hostname):
+        login_user_full(client, 'testuser', TEST_PASSWORD, totp_secret=regular_user_with_totp)
+        resp = client.post(f'/admin/hostnames/{test_hostname}/delete', follow_redirects=True)
         assert b'removed' in resp.data.lower()
 
 
@@ -416,8 +553,8 @@ class TestBootAdminCreation:
         with pytest.raises(RuntimeError, match='ADMIN_PASSWORD is not set'):
             create_app(config_class=config)
 
-    def test_creates_admin_from_env(self, tmp_path, monkeypatch):
-        """App creates admin user on boot when ADMIN_PASSWORD is set."""
+    def test_creates_admin_from_bcrypt_hash(self, tmp_path, monkeypatch):
+        """App creates admin user on boot when ADMIN_PASSWORD is a bcrypt hash."""
         from tests.conftest import TestConfig
         password_hash = _hash_password('bootpass')
         monkeypatch.setenv('ADMIN_PASSWORD', password_hash)
@@ -431,6 +568,24 @@ class TestBootAdminCreation:
             assert admin is not None
             assert admin.username == 'admin'
             assert bcrypt.checkpw(b'bootpass', admin.password_hash.encode())
+
+    def test_creates_admin_from_plaintext(self, tmp_path, monkeypatch):
+        """App creates admin user on boot when ADMIN_PASSWORD is plaintext."""
+        from tests.conftest import TestConfig
+        monkeypatch.setenv('ADMIN_PASSWORD', 'my-plain-password')
+        config = TestConfig(tmp_path)
+        config.TESTING = False
+        from dyndns import create_app
+        application = create_app(config_class=config)
+        from models import User
+        with application.app_context():
+            admin = User.query.filter_by(role='admin').first()
+            assert admin is not None
+            assert admin.username == 'admin'
+            # Password was hashed at boot — verify plaintext works
+            assert bcrypt.checkpw(b'my-plain-password', admin.password_hash.encode())
+            # Stored hash should be bcrypt, not plaintext
+            assert admin.password_hash.startswith('$2b$')
 
     def test_skips_if_admin_exists(self, tmp_path, monkeypatch):
         """App does not create a second admin if one already exists."""

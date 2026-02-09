@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Edit Domain: {{ domain.name }} - DynDNS Admin{% endblock %}
+{% block content %}
+<h2>Domain: {{ domain.name }}</h2>
+
+<div class="row">
+    <div class="col-md-6">
+        <form method="POST">
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                {{ form.name.label(class="form-label") }}
+                {{ form.name(class="form-control") }}
+                {% for error in form.name.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+            </div>
+            <div class="d-flex gap-2">
+                {{ form.submit(class="btn btn-primary") }}
+                <a href="{{ url_for('web.domain_list') }}" class="btn btn-outline-secondary">Back</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<hr>
+<h4>Backends</h4>
+{% if domain.backends %}
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Backend Type</th>
+            <th>Credentials</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for b in domain.backends %}
+        <tr>
+            <td><span class="badge bg-secondary">{{ b.backend_type }}</span></td>
+            <td>
+                {% if b.has_credentials %}
+                <span class="badge bg-success">Configured</span>
+                {% else %}
+                <span class="badge bg-warning text-dark">Not configured</span>
+                {% endif %}
+            </td>
+            <td>
+                <a href="{{ url_for('web.domain_backend_config', domain_id=domain.id, db_id=b.id) }}"
+                   class="btn btn-sm btn-outline-info">Configure</a>
+                <form method="POST" action="{{ url_for('web.domain_backend_delete', domain_id=domain.id, db_id=b.id) }}"
+                      style="display:inline" onsubmit="return confirm('Remove this backend?')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="text-muted">No backends configured.</p>
+{% endif %}
+
+<a href="{{ url_for('web.domain_backend_add', domain_id=domain.id) }}" class="btn btn-outline-primary btn-sm">Add Backend</a>
+
+<hr>
+<h4>Hostnames</h4>
+{% if domain.hostnames %}
+<ul class="list-group mb-3">
+    {% for hn in domain.hostnames %}
+    <li class="list-group-item d-flex justify-content-between">
+        {{ hn.name }}
+        <span class="text-muted">{{ hn.user.username }}</span>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p class="text-muted">No hostnames registered under this domain.</p>
+{% endif %}
+
+<hr>
+<form method="POST" action="{{ url_for('web.domain_delete', domain_id=domain.id) }}"
+      onsubmit="return confirm('Delete domain {{ domain.name }}? This will remove all backends and hostnames.')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-danger btn-sm">Delete Domain</button>
+</form>
+{% endblock %}

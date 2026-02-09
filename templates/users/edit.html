@@ -39,8 +39,8 @@
 
         {% if not is_new %}
         <hr>
-        <h5>Domains</h5>
-        <a href="{{ url_for('web.user_domains', user_id=user.id) }}" class="btn btn-outline-primary btn-sm mb-3">Manage Domains</a>
+        <h5>Hostnames</h5>
+        <a href="{{ url_for('web.user_hostnames', user_id=user.id) }}" class="btn btn-outline-primary btn-sm mb-3">Manage Hostnames</a>
 
         <hr>
         <h5>Two-Factor Authentication</h5>

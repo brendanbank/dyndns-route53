@@ -81,6 +81,7 @@ class nsupdate(BaseAccount):
 
         results = {}
         rtypes = [rtype] if rtype else ['A', 'AAAA']
+        nameserver = creds['nsupdate_nameserver']
 
         for zonename in hostname_zones.keys():
             for hostname in hostname_zones[zonename]:
@@ -92,9 +93,9 @@ class nsupdate(BaseAccount):
 
                 try:
                     log.debug(f'try delete zonename = {zonename}, hostname = {hostname}, rtypes = {rtypes}')
-                    response = dns.query.tcp(update, creds['nsupdate_nameserver'])
+                    response = dns.query.tcp(update, nameserver)
                     log.debug(f'response = {response}')
-                    log.info(f'deleted dns records via nsupdate on {creds["nsupdate_nameserver"]}: {hostname} {rtypes} for update type {self._services}')
+                    log.info(f'deleted dns records via nsupdate on {nameserver}: {hostname} {rtypes} for update type {self._services}')
                     results[hostname] = "good"
                 except Exception as e:
                     log.critical(f'something went wrong! {e}')

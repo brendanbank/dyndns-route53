@@ -163,3 +163,5 @@ Pipfile.lock
 suffix_data.cache
 .DS_Store
 letsencrypt/
+compose.override.yaml
+backups/

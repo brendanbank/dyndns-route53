@@ -45,6 +45,13 @@ python3 migrate_env.py
 python3 getpwd.py [optional-plaintext-password]
 ```
 
+**Backup databases:**
+```
+./scripts/backup.sh                    # Docker (default)
+./scripts/backup.sh --local            # local install
+./scripts/backup.sh --restore ./backups/  # restore from latest backup
+```
+
 ## Architecture
 
 ### Application Factory
@@ -152,7 +159,7 @@ git tag v1.0.0 && git push origin v1.0.0
 
 Docker Compose runs Traefik (TLS via Let's Encrypt HTTP-01 challenge) in front of the Flask/gunicorn container. Docker image is based on `python:3.13-slim` with gunicorn as the WSGI server. Gunicorn imports `dyndns:app` directly.
 
-The `instance/` directory (SQLite databases) is persisted via a Docker named volume (`dyndns-data:/app/instance`).
+The `instance/` directory (SQLite databases) is persisted via a Docker named volume (`dyndns-data:/app/instance`). Use `scripts/backup.sh` to back up and restore these databases safely (WAL-mode safe, works while the app is running).
 
 Traefik uses `network_mode: host` to preserve real client IPs (Docker's userland-proxy rewrites source IPs to the bridge gateway). With host networking, `ports:` is not used — entrypoint addresses use `${HTTP_PORT:-80}` and `${HTTPS_PORT:-443}` directly.
 

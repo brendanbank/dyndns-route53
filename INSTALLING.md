@@ -201,3 +201,58 @@ curl -k -u username:password \
 - `badauth` — invalid credentials
 - `notfqdn` — invalid hostname format
 - `911` — server error
+
+## Backup & Restore
+
+The application stores data in two SQLite databases (`dyndns.db` and `events.db`). The included backup script uses `sqlite3 .backup` for safe, consistent backups — even while the application is running (WAL-mode safe).
+
+### Running a backup
+
+**Docker (default):**
+
+```bash
+./scripts/backup.sh
+./scripts/backup.sh --output /mnt/backups
+```
+
+**Local install:**
+
+```bash
+./scripts/backup.sh --local
+./scripts/backup.sh --local --output /mnt/backups
+```
+
+Backups are saved with timestamps (e.g. `dyndns-20250115-143022.db`) to the `./backups/` directory by default.
+
+### Automated backups (cron)
+
+To run daily backups at 2 AM, keeping files in `/var/backups/dyndns`:
+
+```bash
+# crontab -e
+0 2 * * * cd /path/to/dyndns-route53 && ./scripts/backup.sh --output /var/backups/dyndns >> /var/log/dyndns-backup.log 2>&1
+```
+
+### Restoring from backup
+
+The restore command finds the most recent backup files in the given directory and restores them:
+
+**Docker:**
+
+```bash
+./scripts/backup.sh --restore ./backups/
+# Then restart to pick up the restored data:
+docker compose restart
+```
+
+**Local install:**
+
+```bash
+./scripts/backup.sh --restore ./backups/ --local
+```
+
+### Important notes
+
+- **FERNET_KEY must match.** Backend credentials in the database are encrypted with your `FERNET_KEY`. If you restore a backup to a different installation, you must use the same `FERNET_KEY` or the encrypted credentials will be unreadable.
+- **Backup both databases.** The script backs up `dyndns.db` (users, domains, credentials) and `events.db` (audit log) together.
+- **Old backups accumulate.** The script does not prune old backups. Add cleanup to your cron job or use a tool like `find /var/backups/dyndns -name '*.db' -mtime +30 -delete`.

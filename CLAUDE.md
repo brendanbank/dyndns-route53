@@ -126,11 +126,13 @@ Configured in `.env` (loaded via python-dotenv):
 
 GitHub Actions workflows:
 
-### `docker-publish.yml` — Docker image build and publish
+### `docker-publish.yml` — Test, build, and publish
 
 **Triggers:**
-- Push tag `v*` → builds multi-platform image (`linux/amd64`, `linux/arm64`), pushes to GHCR with semver tags, runs Trivy vulnerability scan, creates GitHub Release
-- Pull request to `main` → builds single-platform image (`linux/amd64`) with `load: true`, runs Trivy scan, uploads SARIF to Security tab (no push to registry)
+- Push tag `v*` → runs tests, builds multi-platform image (`linux/amd64`, `linux/arm64`), pushes to GHCR with semver tags, runs Trivy vulnerability scan, creates GitHub Release
+- Pull request to `main` → runs tests, builds single-platform image (`linux/amd64`) with `load: true`, runs Trivy scan, uploads SARIF to Security tab (no push to registry)
+
+**Test job** (runs before Docker build): `ruff check .` + `python -m pytest tests/ -v`. If lint or tests fail, the build is skipped.
 
 ### `codeql.yml` — Static analysis
 
@@ -162,11 +164,33 @@ There are two compose files:
 - `compose.yaml` — for development. Has `image:` + `build:` (pull uses GHCR, `--build` builds locally). Uses bind-mount for certs, staging ACME server, Loki logging.
 - `compose.example.yaml` — standalone file for end users. No `build:`, named volume for certs, production ACME server, no Loki. Linked from GitHub release notes.
 
-## Testing locally
+## Testing
 
-When testing via curl against the local Traefik instance, you must pass the correct `Host` header since Traefik routes by hostname:
+**Pytest (48 functional tests):**
 ```
-curl -s -k -H "Host: ${TRAEFIK_HOSTNAME}" -u ${USERNAME}:${PASSWORD_CT} \
+python -m pytest tests/ -v
+```
+
+**Ruff lint:**
+```
+ruff check .
+```
+
+**Deployment smoke test:**
+```
+# Production (HTTPS)
+./tests/smoke_test.sh --host dyndns.example.com --user admin --pass secret
+
+# Local Flask dev server (HTTP)
+./tests/smoke_test.sh --http --host localhost:8080 --user admin --pass secret
+
+# Local Docker with Traefik (HTTPS, resolve hostname to localhost)
+./tests/smoke_test.sh --host dyndns.example.com:9443 --resolve 127.0.0.1 --user admin --pass secret
+```
+
+**Manual curl against local Traefik** (must pass `Host` header since Traefik routes by hostname):
+```
+curl -s -k -H "Host: ${TRAEFIK_HOSTNAME}" -u ${USERNAME}:${PASSWORD} \
   "https://localhost:${HTTPS_PORT}/nic/update?hostname=test.dyn.bgwlan.nl&myip=203.0.113.1"
 ```
 Expected response: `good 203.0.113.1` (record created/updated) or `nochg 203.0.113.1` (IP unchanged).

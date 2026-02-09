@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A Dynamic DNS web service that implements the DynDNS v2 protocol (`/nic/update` endpoint). It accepts DNS update requests via HTTP and updates records through pluggable backends: AWS Route53 (via boto3) and BIND nsupdate (via dnspython TSIG). Designed to work with OPNsense's DynDNS client.
+A Dynamic DNS web service that implements the DynDNS v2 protocol (`/nic/update` endpoint). It accepts DNS update requests via HTTP and updates records through pluggable backends: AWS Route53 (via boto3) and BIND nsupdate (via dnspython TSIG). Designed to work with OPNsense's DynDNS client and other DynDNS v2-compatible clients.
 
 ## Running
 
@@ -41,7 +41,7 @@ python3 getpwd.py [optional-plaintext-password]
 
 ### Request Flow
 
-`dyndns.py` is the Flask app with a single endpoint `GET /nic/update`. It authenticates via HTTP Basic Auth (or query params), validates the request, then delegates to an account backend to create DNS records.
+`dyndns.py` is the Flask app with a single endpoint `GET /nic/update`. It authenticates via HTTP Basic Auth (or query params), validates the request, then delegates to an account backend to create DNS records. Responses follow the DynDNS v2 protocol: `good <IP>`, `nochg <IP>`, `badauth`, `notfqdn`, `nohost`, `911`, with one line per hostname.
 
 ### Plugin System (`lib/`)
 
@@ -57,6 +57,8 @@ To add a new DNS backend: create a new file in `lib/account/`, subclass `BaseAcc
 - The `DOMAINS` env var (comma-separated) restricts which domains can be updated. AWS backend additionally fetches hosted zones from Route53.
 - The `updatetype` query parameter selects the backend (default: `aws`).
 - Passwords are stored as bcrypt hashes in `.env` (`PASSWORD`); `PASSWORD_CT` is the cleartext for test scripts.
+- Authentication uses constant-time comparison (`hmac.compare_digest`) to prevent timing attacks.
+- Werkzeug's `ProxyFix` middleware (`x_for=1`) ensures `request.remote_addr` reflects the real client IP from Traefik's `X-Forwarded-For` header.
 
 ## Environment Variables
 
@@ -74,24 +76,37 @@ All configured in `.env` (loaded via python-dotenv):
 
 ## CI/CD
 
-GitHub Actions workflow (`.github/workflows/docker-publish.yml`) builds and publishes multi-platform Docker images (`linux/amd64`, `linux/arm64`) to GHCR.
+GitHub Actions workflows:
+
+### `docker-publish.yml` — Docker image build and publish
 
 **Triggers:**
-- Push tag `v*` → builds image with semver tags (`v1.2.3`, `v1.2`, `v1`, `latest`) and creates a GitHub Release with auto-generated release notes
-- Pull request to `main` → builds image tagged `pr-<number>`
+- Push tag `v*` → builds multi-platform image (`linux/amd64`, `linux/arm64`), pushes to GHCR with semver tags, runs Trivy vulnerability scan, creates GitHub Release
+- Pull request to `main` → builds single-platform image (`linux/amd64`) with `load: true`, runs Trivy scan, uploads SARIF to Security tab (no push to registry)
+
+### `codeql.yml` — Static analysis
+
+**Triggers:**
+- Push tag `v*`, pull request to `main`, weekly schedule (Monday 6am), manual (`workflow_dispatch`)
+
+### Dependabot
+
+- `.github/dependabot.yml` — weekly updates for pip dependencies and GitHub Actions versions
 
 **Releasing a new version:**
 ```
 git tag v1.0.0 && git push origin v1.0.0
 ```
 
-The workflow uses `docker/metadata-action` for tag extraction, `docker/build-push-action` with QEMU for cross-compilation, GitHub Actions cache for layer caching, and `softprops/action-gh-release` for releases. Release notes are generated from `git log`: initial releases show a feature description only; subsequent releases list commits since the previous tag.
-
 **GHCR package visibility** must be set to public manually via the GitHub web UI (Settings > Danger Zone > Change visibility) — the REST API does not support this for user-owned container packages.
 
 ## Deployment
 
-Docker Compose runs Traefik (TLS via Let's Encrypt) in front of the Flask/gunicorn container. Docker image is based on `python:3.13-slim` with gunicorn as the WSGI server. Gunicorn imports `dyndns:app` directly (no file renaming needed).
+Docker Compose runs Traefik (TLS via Let's Encrypt HTTP-01 challenge) in front of the Flask/gunicorn container. Docker image is based on `python:3.13-slim` with gunicorn as the WSGI server. Gunicorn imports `dyndns:app` directly.
+
+Traefik uses `network_mode: host` to preserve real client IPs (Docker's userland-proxy rewrites source IPs to the bridge gateway). With host networking, `ports:` is not used — entrypoint addresses use `${HTTP_PORT:-80}` and `${HTTPS_PORT:-443}` directly.
+
+Gunicorn access log uses a custom format with `%(U)s` (path only) instead of `%(r)s` (full request line) to prevent passwords in query parameters from appearing in logs.
 
 There are two compose files:
 - `compose.yaml` — for development. Has `image:` + `build:` (pull uses GHCR, `--build` builds locally). Uses bind-mount for certs, staging ACME server, Loki logging.
@@ -104,10 +119,12 @@ When testing via curl against the local Traefik instance, you must pass the corr
 curl -s -k -H "Host: ${TRAEFIK_HOSTNAME}" -u ${USERNAME}:${PASSWORD_CT} \
   "https://localhost:${HTTPS_PORT}/nic/update?hostname=test.dyn.bgwlan.nl&myip=203.0.113.1"
 ```
-Expected response: `good` (record created/updated) or `nochg` (IP unchanged).
+Expected response: `good 203.0.113.1` (record created/updated) or `nochg 203.0.113.1` (IP unchanged).
 
 ## Security Notes
 
 - `.env` contains secrets and is in `.gitignore` — never commit it
 - If credentials are accidentally committed, rotate them immediately and rewrite git history (`git checkout --orphan` + force push)
 - GHCR package visibility is independent of repo visibility
+- Query parameter authentication is supported but logs a warning — prefer HTTP Basic Auth
+- Gunicorn access log excludes query strings to prevent password leakage

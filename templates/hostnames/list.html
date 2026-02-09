@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Hostnames{% if is_admin_view %} for {{ user.username }}{% endif %} - DynDNS Admin{% endblock %}
+{% block content %}
+<h2>Hostnames{% if is_admin_view %} for {{ user.username }}{% endif %}</h2>
+
+{% if hostnames %}
+<div class="table-responsive">
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Hostname</th>
+                <th>Domain</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for hn in hostnames %}
+            <tr>
+                <td>{{ hn.name }}</td>
+                <td>{{ hn.domain.name }}</td>
+                <td>{{ hn.created_at.strftime('%Y-%m-%d') if hn.created_at else '' }}</td>
+                <td>
+                    {% if is_admin_view %}
+                    <form method="POST" action="{{ url_for('web.user_hostname_delete', user_id=user.id, hn_id=hn.id) }}"
+                          style="display:inline" onsubmit="return confirm('Remove this hostname?')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                    </form>
+                    {% else %}
+                    <form method="POST" action="{{ url_for('web.my_hostname_delete', hn_id=hn.id) }}"
+                          style="display:inline" onsubmit="return confirm('Remove this hostname?')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p class="text-muted">No hostnames registered.</p>
+{% endif %}
+
+<h4 class="mt-4">Add Hostname</h4>
+<div class="row">
+    <div class="col-md-6">
+        <form method="POST">
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                {{ form.prefix.label(class="form-label") }}
+                <div class="input-group">
+                    {{ form.prefix(class="form-control", placeholder="e.g. myhost") }}
+                    <span class="input-group-text">.</span>
+                    {{ form.domain_id(class="form-select") }}
+                </div>
+                {% for error in form.prefix.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+            </div>
+            {{ form.submit(class="btn btn-primary") }}
+        </form>
+    </div>
+</div>
+
+{% if is_admin_view %}
+<div class="mt-3">
+    <a href="{{ url_for('web.user_edit', user_id=user.id) }}" class="btn btn-outline-secondary">Back to User</a>
+</div>
+{% endif %}
+{% endblock %}

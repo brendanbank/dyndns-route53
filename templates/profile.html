@@ -6,19 +6,19 @@
 <div class="row mt-4">
     <div class="col-md-6">
         <div class="card mb-4">
-            <div class="card-header">My Domains</div>
+            <div class="card-header">My Hostnames</div>
             <div class="card-body">
-                {% if user_domains %}
+                {% if user_hostnames %}
                 <ul class="list-group list-group-flush">
-                    {% for ud in user_domains %}
+                    {% for hn in user_hostnames %}
                     <li class="list-group-item d-flex justify-content-between">
-                        {{ ud.domain_name }}
-                        <span class="badge bg-secondary">{{ ud.backend_type }}</span>
+                        {{ hn.name }}
+                        <span class="badge bg-secondary">{{ hn.domain.name }}</span>
                     </li>
                     {% endfor %}
                 </ul>
                 {% else %}
-                <p class="text-muted">No domains assigned.</p>
+                <p class="text-muted">No hostnames registered.</p>
                 {% endif %}
             </div>
         </div>

@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A Dynamic DNS web service that implements the DynDNS v2 protocol (`/nic/update` endpoint). It accepts DNS update requests via HTTP and updates records through pluggable backends: AWS Route53 (via boto3) and BIND nsupdate (via dnspython TSIG). Designed to work with OPNsense's DynDNS client and other DynDNS v2-compatible clients.
+A Dynamic DNS web service that implements the DynDNS v2 protocol (`/nic/update` and `/nic/delete` endpoints). It accepts DNS update and delete requests via HTTP and manages records through pluggable backends: AWS Route53 (via boto3) and BIND nsupdate (via dnspython TSIG). Designed to work with OPNsense's DynDNS client and other DynDNS v2-compatible clients.
 
-Supports multi-user operation with per-user domains, backend credentials (Fernet-encrypted in SQLite), and a Bootstrap 5 web UI for administration.
+Supports multi-user operation with global domains (admin-managed), per-domain backends with shared credentials, user-owned hostnames, and a Bootstrap 5 web UI for administration.
 
 ## Running
 
@@ -33,6 +33,11 @@ Runs Flask dev server on `0.0.0.0:8080`. Web UI at `http://localhost:8080/admin/
 **Migrate existing .env credentials to database:**
 ```
 python3 migrate_env.py
+```
+
+**Migrate old schema (UserDomain) to new schema (Domain/Hostname):**
+```
+python3 migrate_schema.py
 ```
 
 **Testing an update:**
@@ -64,34 +69,49 @@ python3 getpwd.py [optional-plaintext-password]
 
 Gunicorn uses the factory syntax `dyndns:create_app()` to create the app at worker startup.
 
+### Data Model
+
+```
+User 1---* Hostname *---1 Domain 1---* DomainBackend 1---* BackendConfig
+```
+
+- **Domain** — global zone managed by admin (e.g. `dyn.bgwlan.nl`). Has backends and hostnames.
+- **DomainBackend** — backend config for a domain (aws/nsupdate). Unique constraint on `(domain_id, backend_type)`. Has credentials via BackendConfig.
+- **Hostname** — user-owned FQDN, globally unique (e.g. `myhost.dyn.bgwlan.nl`). Belongs to one domain and one user.
+- **BackendConfig** — per-backend encrypted key-value pairs (e.g. `aws_access_key_id`). FK to `domain_backends`. Values Fernet-encrypted.
+- **User** — username, bcrypt password hash, role (`admin`/`user`), active flag, TOTP secret. Has hostnames.
+- **Event** — DNS update audit log (separate SQLite bind `events`). Records user, hostname, IP, backend, response.
+
 ### Request Flow
 
-`GET /nic/update` authenticates via HTTP Basic Auth (or query params) against the `users` table, retrieves the user's per-backend domains and Fernet-encrypted credentials from the database, then delegates to the matching backend plugin. Responses follow the DynDNS v2 protocol: `good <IP>`, `nochg <IP>`, `badauth`, `notfqdn`, `nohost`, `911`, with one line per hostname. Each update is logged to the events database.
+`GET /nic/update` authenticates via HTTP Basic Auth (or query params) against the `users` table. For each hostname in the request:
+1. Look up `Hostname` record by exact name match + user ownership
+2. If not found → `nohost`
+3. Get all `DomainBackend` records for the hostname's domain
+4. For each backend: get Fernet-encrypted credentials, create account via `AccountFactory`, call `createrecords()`
+5. Log one `Event` per backend attempt
+6. Aggregate result: `good` if any backend succeeded, `nochg` if all unchanged, error otherwise
 
-### Database Models (`models.py`)
+The `updatetype` parameter is deprecated and ignored — all backends for the domain are updated automatically.
 
-- **User** — username, bcrypt password hash, role (`admin`/`user`), active flag. Integrates `flask_login.UserMixin`.
-- **Domain** — allowed domain names (e.g. `dyn.bgwlan.nl`).
-- **UserDomain** — maps users to domains with a backend type. Unique constraint on `(user_id, domain_id)`.
-- **BackendConfig** — per-user, per-backend encrypted key-value pairs (e.g. `aws_access_key_id`). Values encrypted with Fernet.
-- **Event** — DNS update audit log (separate SQLite bind `events`). Records user, hostname, IP, backend, response.
+`GET /nic/delete` uses the same auth and hostname lookup. If `myip` is provided, only the matching record type (A or AAAA) is deleted; if omitted, both A and AAAA records are deleted. Calls `deleterecords()` on each backend. Events are logged with `event_type='dns_delete'`.
 
 ### Plugin System (`lib/`)
 
-- `lib/accounts.py` — `BaseAccount` base class and `AccountFactory`. The factory auto-discovers account classes from `lib/account/*.py` at startup via `importlib`. Each backend subclass defines `_services` (list of service names), `match()`, and `createrecords()`.
-- `lib/account/aws.py` — `AWS` class: updates Route53 via boto3. Reads credentials from `account['credentials']` dict (DB-backed) with env var fallback.
-- `lib/account/nsupdate.py` — `nsupdate` class: updates BIND DNS via TSIG-authenticated `dns.update`/`dns.query.tcp`. Same credential pattern.
+- `lib/accounts.py` — `BaseAccount` base class and `AccountFactory`. The factory auto-discovers account classes from `lib/account/*.py` at startup via `importlib`. Each backend subclass defines `_services` (list of service names), `match()`, `createrecords()`, and `deleterecords()`.
+- `lib/account/aws.py` — `AWS` class: updates/deletes Route53 records via boto3. Reads credentials from `account['credentials']` dict (DB-backed) with env var fallback.
+- `lib/account/nsupdate.py` — `nsupdate` class: updates/deletes BIND DNS records via TSIG-authenticated `dns.update`/`dns.query.tcp`. Same credential pattern.
 
 Backend plugins accept domains from `account['domains']` and credentials from `account['credentials']`, falling back to environment variables for backward compatibility.
 
-To add a new DNS backend: create a new file in `lib/account/`, subclass `BaseAccount`, implement `_services`, `match()`, `known_services()`, `_get_credentials()`, and `createrecords()`. It will be auto-registered.
+To add a new DNS backend: create a new file in `lib/account/`, subclass `BaseAccount`, implement `_services`, `match()`, `known_services()`, `_get_credentials()`, `createrecords()`, and `deleterecords()`. It will be auto-registered.
 
 ### Web UI (`web_routes.py`, `templates/`)
 
 Bootstrap 5 dark-theme UI at `/admin/`. Flask-Login session auth.
 
-**Admin routes:** user CRUD, domain CRUD, per-user domain assignment, per-user backend credential config, event log viewer.
-**User self-service:** view assigned domains, browse own event history, change password.
+**Admin routes:** user CRUD, global domain CRUD, per-domain backend management + credential config, per-user hostname management, event log viewer.
+**User self-service:** register/remove hostnames under available domains, browse own event history, change password.
 
 ### Auth (`auth.py`)
 
@@ -102,11 +122,11 @@ Web login is a multi-step flow: password verification stores `pending_2fa_user_i
 ### Key behaviors
 
 - Before updating DNS, `check_hostnameon_server()` resolves the current record against the authoritative nameserver. If the IP hasn't changed, the update is skipped.
-- Per-user domains (from `user_domains` table) restrict which domains each user can update. AWS backend additionally fetches hosted zones from Route53.
-- The `updatetype` query parameter selects the backend (default: `aws`).
+- Hostnames are globally unique — each hostname belongs to exactly one user and one domain.
+- Users register hostnames under admin-created domains. When updated via `/nic/update`, all backends configured for the hostname's domain are called.
 - Passwords are stored as bcrypt hashes in the `users` table.
 - Authentication uses constant-time comparison (`hmac.compare_digest`) to prevent timing attacks.
-- Backend credentials are Fernet-encrypted at rest. Loss of `FERNET_KEY` = loss of all stored credentials.
+- Backend credentials are Fernet-encrypted at rest per domain backend. Loss of `FERNET_KEY` = loss of all stored credentials.
 - Werkzeug's `ProxyFix` middleware (`x_for=1`) ensures `request.remote_addr` reflects the real client IP from Traefik's `X-Forwarded-For` header.
 - SQLite WAL mode enabled for concurrent read access under gunicorn workers.
 
@@ -117,7 +137,7 @@ Configured in `.env` (loaded via python-dotenv):
 **Required:**
 - `SECRET_KEY` — Flask session secret
 - `FERNET_KEY` — Fernet encryption key for backend credentials in database
-- `ADMIN_PASSWORD` — bcrypt-hashed password for the initial admin user (generate with `python3 getpwd.py`). Required on first boot when no admin exists; app will refuse to start without it.
+- `ADMIN_PASSWORD` — password for the initial admin user. Accepts plaintext (hashed automatically at boot) or a pre-computed bcrypt hash (detected by `$2b$`/`$2a$`/`$2y$` prefix). Required on first boot when no admin exists; app will refuse to start without it.
 
 **Optional:**
 - `ADMIN_TOTP_SECRET` — base32 TOTP secret for admin 2FA (generate with `python3 -c "import pyotp; print(pyotp.random_base32())"`)
@@ -171,7 +191,7 @@ There are two compose files:
 
 ## Testing
 
-**Pytest (48 functional tests):**
+**Pytest (77 functional tests):**
 ```
 python -m pytest tests/ -v
 ```
@@ -193,12 +213,35 @@ ruff check .
 ./tests/smoke_test.sh --host dyndns.example.com:9443 --resolve 127.0.0.1 --user admin --pass secret
 ```
 
+**DNS smoke test (real DNS update + delete against live backends):**
+```
+# Load credentials and run (requires .env.smoketest with backend creds)
+source .env.smoketest && ./tests/smoke_test_dns.sh
+
+# Or pass all arguments explicitly
+./tests/smoke_test_dns.sh --host localhost:8080 --http \
+    --user admin --pass secret \
+    --hostname test.dyn.example.com --myip 203.0.113.42 \
+    --nameserver 8.8.8.8
+```
+Creates an A record, verifies it via DNS lookup, confirms `nochg` on duplicate update, deletes the record, verifies deletion, and confirms `nochg` on duplicate delete. Always cleans up test records on exit (even on failure).
+
 **Manual curl against local Traefik** (must pass `Host` header since Traefik routes by hostname):
 ```
+# Update a record
 curl -s -k -H "Host: ${TRAEFIK_HOSTNAME}" -u ${USERNAME}:${PASSWORD} \
   "https://localhost:${HTTPS_PORT}/nic/update?hostname=test.dyn.bgwlan.nl&myip=203.0.113.1"
+
+# Delete a record (both A and AAAA)
+curl -s -k -H "Host: ${TRAEFIK_HOSTNAME}" -u ${USERNAME}:${PASSWORD} \
+  "https://localhost:${HTTPS_PORT}/nic/delete?hostname=test.dyn.bgwlan.nl"
+
+# Delete only the A record matching a specific IP
+curl -s -k -H "Host: ${TRAEFIK_HOSTNAME}" -u ${USERNAME}:${PASSWORD} \
+  "https://localhost:${HTTPS_PORT}/nic/delete?hostname=test.dyn.bgwlan.nl&myip=203.0.113.1"
 ```
-Expected response: `good 203.0.113.1` (record created/updated) or `nochg 203.0.113.1` (IP unchanged).
+Expected update response: `good 203.0.113.1` (record created/updated) or `nochg 203.0.113.1` (IP unchanged).
+Expected delete response: `good` (record deleted) or `nochg` (record didn't exist).
 
 ## Security Notes
 

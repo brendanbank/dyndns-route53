@@ -112,3 +112,53 @@ class AWS(BaseAccount):
                 log.info(f'created dns entry via route53 record: {hostname} {rtype} {IP} for update type {self._services}')
 
         return (results)
+
+    def deleterecords(self, hostname_zones, rtype=None):
+        creds = self._get_credentials()
+        if not creds.get('aws_access_key_id') or not creds.get('aws_secret_access_key'):
+            log.error('AWS credentials not configured — cannot delete records')
+            return {h: 'dnserr' for hosts in hostname_zones.values() for h in hosts}
+
+        client = boto3.client('route53', **creds)
+        results = {}
+        rtypes = [rtype] if rtype else ['A', 'AAAA']
+
+        for zonename in hostname_zones.keys():
+            zoneId = self._zones[zonename]
+
+            try:
+                rrsets = client.list_resource_record_sets(HostedZoneId=zoneId)
+            except Exception as e:
+                log.critical(f'Failed to list record sets for zone {zonename}: {e}')
+                for hostname in hostname_zones[zonename]:
+                    results[hostname] = "dnserr"
+                continue
+
+            for hostname in hostname_zones[zonename]:
+                rrecords = []
+                for rs in rrsets.get('ResourceRecordSets', []):
+                    rs_name = rs['Name'].rstrip('.')
+                    if rs_name.lower() != hostname.lower():
+                        continue
+                    if rs['Type'] in rtypes:
+                        rrecords.append({
+                            'Action': 'DELETE',
+                            'ResourceRecordSet': rs,
+                        })
+
+                if not rrecords:
+                    log.info(f'No matching records to delete for {hostname} in zone {zonename}')
+                    results[hostname] = "nochg"
+                    continue
+
+                try:
+                    reply = client.change_resource_record_sets(
+                        ChangeBatch={'Changes': rrecords}, HostedZoneId=zoneId)
+                    log.debug(f'delete reply = {reply}')
+                    results[hostname] = "good"
+                    log.info(f'deleted dns entry via route53: {hostname} {rtypes} for update type {self._services}')
+                except Exception as e:
+                    log.critical(f'Failed to delete records for {hostname}: {e}')
+                    results[hostname] = "dnserr"
+
+        return results

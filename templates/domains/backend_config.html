@@ -1,8 +1,7 @@
 {% extends "base.html" %}
-{% block title %}{{ ud.backend_type }} Config for {{ ud.domain_name }} - DynDNS Admin{% endblock %}
+{% block title %}{{ db_backend.backend_type }} Config for {{ domain.name }} - DynDNS Admin{% endblock %}
 {% block content %}
-<h2>{{ ud.backend_type | upper }} Credentials for {{ ud.domain_name }}</h2>
-<p class="text-muted">User: {{ user.username }}</p>
+<h2>{{ db_backend.backend_type | upper }} Credentials for {{ domain.name }}</h2>
 <div class="row">
     <div class="col-md-6">
         <form method="POST">
@@ -16,7 +15,7 @@
             {% endfor %}
             <div class="d-flex gap-2">
                 <button type="submit" class="btn btn-primary">Save</button>
-                <a href="{{ url_for('web.user_domains', user_id=user.id) }}" class="btn btn-outline-secondary">Back to Domains</a>
+                <a href="{{ url_for('web.domain_edit', domain_id=domain.id) }}" class="btn btn-outline-secondary">Back to Domain</a>
             </div>
         </form>
     </div>

@@ -130,6 +130,41 @@ def inactive_user(app):
     return uid
 
 
+# --- Domain / Hostname fixtures ---
+
+@pytest.fixture
+def test_domain(app):
+    from models import db, Domain
+    with app.app_context():
+        domain = Domain(name='example.com')
+        db.session.add(domain)
+        db.session.commit()
+        did = domain.id
+    return did
+
+
+@pytest.fixture
+def test_domain_with_backend(app, test_domain):
+    from models import db, DomainBackend
+    with app.app_context():
+        db_backend = DomainBackend(domain_id=test_domain, backend_type='aws')
+        db.session.add(db_backend)
+        db.session.commit()
+        bid = db_backend.id
+    return bid
+
+
+@pytest.fixture
+def test_hostname(app, regular_user, test_domain):
+    from models import db, Hostname
+    with app.app_context():
+        hn = Hostname(name='test.example.com', domain_id=test_domain, user_id=regular_user)
+        db.session.add(hn)
+        db.session.commit()
+        hid = hn.id
+    return hid
+
+
 # --- Helpers ---
 
 def get_csrf_token(html):

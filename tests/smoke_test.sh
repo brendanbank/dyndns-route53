@@ -97,13 +97,13 @@ else
     fail "/nic/update no auth -> badauth (got: ${body})"
 fi
 
-# 5. /nic/update with valid auth returns a valid DynDNS response
+# 5. /nic/update with valid auth but unregistered hostname returns nohost
 body=$(curl "${CURL_OPTS[@]}" -u "${USERNAME}:${PASSWORD}" \
     "${BASE_URL}/nic/update?hostname=smoketest.example.com&myip=203.0.113.99")
-if echo "$body" | grep -qE '(good|nochg|nohost|notfqdn|911)'; then
-    pass "/nic/update valid auth -> valid response (${body})"
+if echo "$body" | grep -q 'nohost'; then
+    pass "/nic/update unregistered hostname -> nohost"
 else
-    fail "/nic/update valid auth -> valid response (got: ${body})"
+    fail "/nic/update unregistered hostname -> nohost (got: ${body})"
 fi
 
 # 6. Static CSS returns 200
@@ -145,6 +145,32 @@ if echo "$body" | grep -q 'notfqdn'; then
     pass "/nic/update invalid hostname -> notfqdn"
 else
     fail "/nic/update invalid hostname -> notfqdn (got: ${body})"
+fi
+
+# 11. Deprecated updatetype param is accepted (not an error)
+body=$(curl "${CURL_OPTS[@]}" -u "${USERNAME}:${PASSWORD}" \
+    "${BASE_URL}/nic/update?hostname=smoketest.example.com&myip=203.0.113.99&updatetype=aws")
+if echo "$body" | grep -qE '(nohost|good|nochg|911)'; then
+    pass "/nic/update with updatetype param -> valid response (${body})"
+else
+    fail "/nic/update with updatetype param -> valid response (got: ${body})"
+fi
+
+# 12. /nic/delete with bad auth returns badauth
+body=$(curl "${CURL_OPTS[@]}" -u "baduser:badpass" "${BASE_URL}/nic/delete?hostname=test.example.com")
+if echo "$body" | grep -q 'badauth'; then
+    pass "/nic/delete bad auth -> badauth"
+else
+    fail "/nic/delete bad auth -> badauth (got: ${body})"
+fi
+
+# 13. /nic/delete with valid auth returns valid response
+body=$(curl "${CURL_OPTS[@]}" -u "${USERNAME}:${PASSWORD}" \
+    "${BASE_URL}/nic/delete?hostname=smoketest.example.com")
+if echo "$body" | grep -qE '(nohost|good|nochg|911)'; then
+    pass "/nic/delete valid auth -> valid response (${body})"
+else
+    fail "/nic/delete valid auth -> valid response (got: ${body})"
 fi
 
 echo

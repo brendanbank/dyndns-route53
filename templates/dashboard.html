@@ -5,7 +5,7 @@
 
 {% if current_user.is_admin %}
 <div class="row mt-4">
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="card text-center">
             <div class="card-body">
                 <h5 class="card-title">Users</h5>
@@ -14,16 +14,24 @@
             </div>
         </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="card text-center">
             <div class="card-body">
                 <h5 class="card-title">Domains</h5>
                 <p class="display-6">{{ domain_count }}</p>
-                <a href="{{ url_for('web.user_list') }}" class="btn btn-outline-primary btn-sm">Manage</a>
+                <a href="{{ url_for('web.domain_list') }}" class="btn btn-outline-primary btn-sm">Manage</a>
             </div>
         </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">Hostnames</h5>
+                <p class="display-6">{{ hostname_count }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
         <div class="card text-center">
             <div class="card-body">
                 <h5 class="card-title">Events</h5>
@@ -37,19 +45,19 @@
 <div class="row mt-4">
     <div class="col-md-6">
         <div class="card">
-            <div class="card-header">My Domains</div>
+            <div class="card-header">My Hostnames</div>
             <div class="card-body">
-                {% if user_domains %}
+                {% if user_hostnames %}
                 <ul class="list-group list-group-flush">
-                    {% for ud in user_domains %}
+                    {% for hn in user_hostnames %}
                     <li class="list-group-item d-flex justify-content-between">
-                        {{ ud.domain_name }}
-                        <span class="badge bg-secondary">{{ ud.backend_type }}</span>
+                        {{ hn.name }}
+                        <span class="badge bg-secondary">{{ hn.domain.name }}</span>
                     </li>
                     {% endfor %}
                 </ul>
                 {% else %}
-                <p class="text-muted">No domains assigned.</p>
+                <p class="text-muted">No hostnames registered. <a href="{{ url_for('web.my_hostnames') }}">Add one</a>.</p>
                 {% endif %}
             </div>
         </div>

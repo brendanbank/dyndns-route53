@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Domains - DynDNS Admin{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>Domains</h2>
+</div>
+
+<div class="table-responsive">
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Domain</th>
+                <th>Backends</th>
+                <th>Hostnames</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for domain in domains %}
+            <tr>
+                <td><a href="{{ url_for('web.domain_edit', domain_id=domain.id) }}">{{ domain.name }}</a></td>
+                <td>
+                    {% for b in domain.backends %}
+                    <span class="badge bg-{{ 'success' if b.has_credentials else 'warning text-dark' }}">{{ b.backend_type }}</span>
+                    {% endfor %}
+                    {% if not domain.backends %}
+                    <span class="text-muted">None</span>
+                    {% endif %}
+                </td>
+                <td>{{ domain.hostnames|length }}</td>
+                <td>{{ domain.created_at.strftime('%Y-%m-%d') if domain.created_at else '' }}</td>
+                <td>
+                    <a href="{{ url_for('web.domain_edit', domain_id=domain.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<h4 class="mt-4">Add Domain</h4>
+<div class="row">
+    <div class="col-md-6">
+        <form method="POST">
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                {{ form.name.label(class="form-label") }}
+                {{ form.name(class="form-control", placeholder="e.g. dyn.example.com") }}
+                {% for error in form.name.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+            </div>
+            {{ form.submit(class="btn btn-primary") }}
+        </form>
+    </div>
+</div>
+{% endblock %}

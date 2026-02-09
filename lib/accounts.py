@@ -194,6 +194,11 @@ class BaseAccount:
             log.info(f'IP Address for {hostname} resolved in: {IP_dns} IP has changed to {IP_request} for update type {self._services}')
             return (False)
 
+    def deleterecords(self, hostname_zones, rtype=None):
+        """Delete DNS records. Subclasses should override this.
+        Returns dict: hostname -> 'good'/'nochg'/'dnserr'."""
+        return {h: 'dnserr' for hosts in hostname_zones.values() for h in hosts}
+
     def get_authoritative_nameserver(self,domain):
 
         n = dns.name.from_text(domain)

@@ -11,7 +11,7 @@ from auth import admin_required, authenticate_dyndns_user
 
 web_bp = Blueprint('web', __name__)
 
-ITEMS_PER_PAGE = 25
+ITEMS_PER_PAGE = 20
 
 AWS_CONFIG_KEYS = [
     ('aws_access_key_id', 'AWS Access Key ID'),
@@ -455,6 +455,16 @@ def event_list():
     events = query.order_by(Event.created_at.desc()).paginate(page=page, per_page=ITEMS_PER_PAGE, error_out=False)
     return render_template('events/list.html', events=events, username_filter=username_filter,
                            hostname_filter=hostname_filter)
+
+
+@web_bp.route('/admin/events/clear', methods=['POST'])
+@login_required
+@admin_required
+def event_clear():
+    count = Event.query.delete()
+    db.session.commit()
+    flash(f'Deleted {count} event(s).', 'success')
+    return redirect(url_for('web.event_list'))
 
 
 # --- Profile (Self-service) ---

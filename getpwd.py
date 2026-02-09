@@ -28,7 +28,7 @@ def genpwd():
     
     return (pwd)
 
-if password == None:
+if password is None:
     password = genpwd()
 
 e_pwd = password.encode()

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Profile - DynDNS Admin{% endblock %}
+{% block content %}
+<h2>Profile: {{ current_user.username }}</h2>
+
+<div class="row mt-4">
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header">My Domains</div>
+            <div class="card-body">
+                {% if user_domains %}
+                <ul class="list-group list-group-flush">
+                    {% for ud in user_domains %}
+                    <li class="list-group-item d-flex justify-content-between">
+                        {{ ud.domain_name }}
+                        <span class="badge bg-secondary">{{ ud.backend_type }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted">No domains assigned.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header">Two-Factor Authentication</div>
+            <div class="card-body">
+                {% if has_totp %}
+                <p>Status: <span class="badge bg-success">Enabled</span></p>
+                <form method="POST" action="{{ url_for('web.totp_reset_self') }}"
+                      onsubmit="return confirm('Reset two-factor authentication? You will need to set it up again on next login.')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-3">
+                        <label class="form-label">Current Password</label>
+                        <input type="password" name="current_password" class="form-control" required>
+                    </div>
+                    <button type="submit" class="btn btn-warning btn-sm">Reset 2FA</button>
+                </form>
+                {% else %}
+                <p>Status: <span class="badge bg-secondary">Not configured</span></p>
+                <p class="text-muted mb-0">Two-factor authentication will be set up on your next login.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <h4>Change Password</h4>
+        <form method="POST">
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                {{ form.current_password.label(class="form-label") }}
+                {{ form.current_password(class="form-control") }}
+            </div>
+            <div class="mb-3">
+                {{ form.new_password.label(class="form-label") }}
+                {{ form.new_password(class="form-control") }}
+                {% for error in form.new_password.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+            </div>
+            <div class="mb-3">
+                {{ form.confirm_password.label(class="form-label") }}
+                {{ form.confirm_password(class="form-control") }}
+                {% for error in form.confirm_password.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+            </div>
+            {{ form.submit(class="btn btn-primary") }}
+        </form>
+    </div>
+</div>
+{% endblock %}

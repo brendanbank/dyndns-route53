@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{{ ud.backend_type }} Config for {{ ud.domain_name }} - DynDNS Admin{% endblock %}
+{% block content %}
+<h2>{{ ud.backend_type | upper }} Credentials for {{ ud.domain_name }}</h2>
+<p class="text-muted">User: {{ user.username }}</p>
+<div class="row">
+    <div class="col-md-6">
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% for key, label in config_keys %}
+            <div class="mb-3">
+                <label for="{{ key }}" class="form-label">{{ label }}</label>
+                <input type="text" class="form-control" id="{{ key }}" name="{{ key }}"
+                       value="{{ current_values.get(key, '') }}" autocomplete="off">
+            </div>
+            {% endfor %}
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary">Save</button>
+                <a href="{{ url_for('web.user_domains', user_id=user.id) }}" class="btn btn-outline-secondary">Back to Domains</a>
+            </div>
+        </form>
+    </div>
+</div>
+<div class="mt-3">
+    <small class="text-muted">Credentials are encrypted at rest with Fernet. Clear a field to remove it.</small>
+</div>
+{% endblock %}

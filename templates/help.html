@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block title %}Help - DynDNS Admin{% endblock %}
+{% block content %}
+<h2>Help</h2>
+<p class="text-muted">Reference guide for using the DynDNS service and web interface.</p>
+
+<div class="accordion mt-4" id="helpAccordion">
+
+    <!-- DynDNS Update Endpoint -->
+    <div class="accordion-item">
+        <h2 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseEndpoint">
+                DynDNS Update Endpoint
+            </button>
+        </h2>
+        <div id="collapseEndpoint" class="accordion-collapse collapse" data-bs-parent="#helpAccordion">
+            <div class="accordion-body">
+                <p>This service implements the <strong>DynDNS v2 protocol</strong>. DNS records are updated via a single HTTP GET request:</p>
+                <pre class="bg-dark p-3 rounded"><code>GET /nic/update?hostname=&lt;FQDN&gt;&amp;myip=&lt;IP&gt;&amp;updatetype=&lt;backend&gt;</code></pre>
+
+                <h5>Parameters</h5>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead><tr><th>Parameter</th><th>Required</th><th>Description</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>hostname</code></td><td>Yes</td><td>Fully qualified domain name to update (e.g. <code>home.dyn.example.com</code>). Comma-separated for multiple.</td></tr>
+                            <tr><td><code>myip</code></td><td>No</td><td>IP address to set. If omitted, the client's source IP is used.</td></tr>
+                            <tr><td><code>updatetype</code></td><td>No</td><td>Backend to use: <code>aws</code> (default) or <code>nsupdate</code>.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <h5>Authentication</h5>
+                <p>Use <strong>HTTP Basic Auth</strong> with your DynDNS username and password. This is the recommended method.</p>
+                <pre class="bg-dark p-3 rounded"><code>curl -u username:password "https://dyndns.example.com/nic/update?hostname=home.dyn.example.com&amp;myip=203.0.113.1"</code></pre>
+                <p class="text-warning">Query parameter authentication (<code>username</code> / <code>password</code>) is supported for compatibility but not recommended &mdash; credentials may appear in server logs.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Response Codes -->
+    <div class="accordion-item">
+        <h2 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseResponses">
+                Response Codes
+            </button>
+        </h2>
+        <div id="collapseResponses" class="accordion-collapse collapse" data-bs-parent="#helpAccordion">
+            <div class="accordion-body">
+                <p>The update endpoint returns one line per hostname with a status code followed by the IP address:</p>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead><tr><th>Code</th><th>Meaning</th></tr></thead>
+                        <tbody>
+                            <tr><td><span class="badge bg-success">good</span></td><td>DNS record was created or updated successfully.</td></tr>
+                            <tr><td><span class="badge bg-info">nochg</span></td><td>IP address has not changed; no update performed.</td></tr>
+                            <tr><td><span class="badge bg-danger">badauth</span></td><td>Invalid username or password.</td></tr>
+                            <tr><td><span class="badge bg-danger">notfqdn</span></td><td>The hostname is not a valid fully qualified domain name.</td></tr>
+                            <tr><td><span class="badge bg-danger">nohost</span></td><td>The hostname does not match any domain assigned to your account.</td></tr>
+                            <tr><td><span class="badge bg-danger">dnserr</span></td><td>DNS backend returned an error while processing the update.</td></tr>
+                            <tr><td><span class="badge bg-danger">911</span></td><td>Server-side error (missing credentials, invalid IP, or internal failure).</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Client Configuration -->
+    <div class="accordion-item">
+        <h2 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseClients">
+                Client Configuration Examples
+            </button>
+        </h2>
+        <div id="collapseClients" class="accordion-collapse collapse" data-bs-parent="#helpAccordion">
+            <div class="accordion-body">
+
+                <h5>curl (quick test)</h5>
+<pre class="bg-dark p-3 rounded"><code>curl -u username:password \
+  "https://dyndns.example.com/nic/update?hostname=home.dyn.example.com&amp;myip=203.0.113.1"</code></pre>
+
+                <h5 class="mt-4">OPNsense</h5>
+                <p>Under <strong>Services &rarr; Dynamic DNS</strong>, add a new entry:</p>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <tbody>
+                            <tr><td><strong>Service</strong></td><td>Custom</td></tr>
+                            <tr><td><strong>Protocol</strong></td><td><code>dyndns2</code></td></tr>
+                            <tr><td><strong>Server</strong></td><td><code>dyndns.example.com</code></td></tr>
+                            <tr><td><strong>Username</strong></td><td>Your DynDNS username</td></tr>
+                            <tr><td><strong>Password</strong></td><td>Your DynDNS password</td></tr>
+                            <tr><td><strong>Hostname</strong></td><td><code>home.dyn.example.com</code></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <h5 class="mt-4">ddclient</h5>
+<pre class="bg-dark p-3 rounded"><code>protocol=dyndns2
+server=dyndns.example.com
+ssl=yes
+login=username
+password='password'
+home.dyn.example.com</code></pre>
+
+                <h5 class="mt-4">Fritz!Box</h5>
+                <p>Under <strong>Internet &rarr; Permit Access &rarr; DynDNS</strong>:</p>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <tbody>
+                            <tr><td><strong>DynDNS Provider</strong></td><td>User-defined</td></tr>
+                            <tr><td><strong>Update URL</strong></td><td><code>https://dyndns.example.com/nic/update?hostname=&lt;domain&gt;&amp;myip=&lt;ipaddr&gt;</code></td></tr>
+                            <tr><td><strong>Domain Name</strong></td><td><code>home.dyn.example.com</code></td></tr>
+                            <tr><td><strong>Username</strong></td><td>Your DynDNS username</td></tr>
+                            <tr><td><strong>Password</strong></td><td>Your DynDNS password</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Self-Service Features -->
+    <div class="accordion-item">
+        <h2 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSelfService">
+                Self-Service Features
+            </button>
+        </h2>
+        <div id="collapseSelfService" class="accordion-collapse collapse" data-bs-parent="#helpAccordion">
+            <div class="accordion-body">
+                <ul>
+                    <li><strong>Dashboard</strong> &mdash; View your assigned domains and recent DNS update events.</li>
+                    <li><strong>Events</strong> &mdash; Browse your full event history with filtering by hostname.</li>
+                    <li><strong>Profile</strong> &mdash; Change your password. Click your username in the navigation bar.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    {% if current_user.is_admin %}
+    <!-- Admin: Managing Users -->
+    <div class="accordion-item">
+        <h2 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseUsers">
+                Managing Users
+            </button>
+        </h2>
+        <div id="collapseUsers" class="accordion-collapse collapse" data-bs-parent="#helpAccordion">
+            <div class="accordion-body">
+                <p>Navigate to <strong>Users</strong> in the navigation bar to manage user accounts.</p>
+                <ul>
+                    <li><strong>Create</strong> &mdash; Click "New User" and fill in username, password, role, and active status.</li>
+                    <li><strong>Edit</strong> &mdash; Click a username to change their password, role, or active status. Leave the password field empty to keep the current password.</li>
+                    <li><strong>Activate / Deactivate</strong> &mdash; Uncheck "Active" to disable a user without deleting them. Deactivated users cannot log in or update DNS records.</li>
+                    <li><strong>Delete</strong> &mdash; Permanently removes the user and all their domain assignments. You cannot delete your own account.</li>
+                </ul>
+                <h5>Roles</h5>
+                <ul>
+                    <li><strong>admin</strong> &mdash; Full access to all users, domains, credentials, and events.</li>
+                    <li><strong>user</strong> &mdash; Can update DNS records for assigned domains, view own events, and change own password.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin: Managing Domains -->
+    <div class="accordion-item">
+        <h2 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDomains">
+                Managing Domains
+            </button>
+        </h2>
+        <div id="collapseDomains" class="accordion-collapse collapse" data-bs-parent="#helpAccordion">
+            <div class="accordion-body">
+                <p>Domains are assigned per user from the user edit page. Click a username, then "Manage Domains".</p>
+                <ul>
+                    <li><strong>Add Domain</strong> &mdash; Enter the parent domain (e.g. <code>dyn.example.com</code>) and select a backend type. Users can then update any hostname under that domain (e.g. <code>home.dyn.example.com</code>).</li>
+                    <li><strong>Backend Type</strong> &mdash; Each domain assignment is tied to a specific backend (<code>aws</code> or <code>nsupdate</code>). The same domain can be assigned with different backends.</li>
+                    <li><strong>Delete</strong> &mdash; Removes the domain assignment and its associated backend credentials.</li>
+                </ul>
+                <p>A user can only update hostnames that fall under one of their assigned domains. If a hostname does not match, the server returns <code>nohost</code>.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin: Backend Credentials -->
+    <div class="accordion-item">
+        <h2 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseCredentials">
+                Backend Credentials
+            </button>
+        </h2>
+        <div id="collapseCredentials" class="accordion-collapse collapse" data-bs-parent="#helpAccordion">
+            <div class="accordion-body">
+                <p>Each domain assignment has its own set of backend credentials, configured via the "Config" button on the user's domain list.</p>
+                <p>Credentials are <strong>Fernet-encrypted</strong> at rest in the database. The encryption key is set via the <code>FERNET_KEY</code> environment variable. If this key is lost, all stored credentials become unrecoverable.</p>
+
+                <h5 class="mt-3">AWS Route53</h5>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead><tr><th>Key</th><th>Description</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>AWS Access Key ID</code></td><td>IAM access key with Route53 permissions.</td></tr>
+                            <tr><td><code>AWS Secret Access Key</code></td><td>Corresponding secret key.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p>The IAM user needs at minimum: <code>route53:ChangeResourceRecordSets</code>, <code>route53:ListHostedZonesByName</code>, and <code>route53:ListResourceRecordSets</code>.</p>
+
+                <h5 class="mt-3">nsupdate (BIND / TSIG)</h5>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead><tr><th>Key</th><th>Description</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>TSIG Key Name</code></td><td>Name of the TSIG key configured in BIND.</td></tr>
+                            <tr><td><code>TSIG Algorithm</code></td><td>Algorithm (e.g. <code>hmac-sha256</code>).</td></tr>
+                            <tr><td><code>TSIG Secret</code></td><td>Base64-encoded TSIG secret.</td></tr>
+                            <tr><td><code>Nameserver</code></td><td>IP address or hostname of the authoritative nameserver to send updates to.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+{% endblock %}

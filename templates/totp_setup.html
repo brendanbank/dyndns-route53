@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Set Up Two-Factor Authentication - DynDNS Admin{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-5">
+        <h2 class="mb-4">Set Up Two-Factor Authentication</h2>
+        <p>Scan the QR code below with your authenticator app (Google Authenticator, Authy, etc.).</p>
+
+        <div class="text-center my-4">
+            <div class="d-inline-block p-3 bg-white rounded">
+                {{ qr_svg|safe }}
+            </div>
+        </div>
+
+        <div class="mb-4">
+            <label class="form-label">Manual entry key</label>
+            <input type="text" class="form-control font-monospace" value="{{ secret }}" readonly onclick="this.select()">
+        </div>
+
+        <p>Enter the 6-digit code from your authenticator app to verify setup:</p>
+        <form method="POST">
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                {{ form.code.label(class="form-label") }}
+                {{ form.code(class="form-control", inputmode="numeric", autocomplete="one-time-code", autofocus=true, maxlength=6, pattern="[0-9]{6}") }}
+                {% for error in form.code.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+            </div>
+            {{ form.submit(class="btn btn-primary w-100") }}
+        </form>
+    </div>
+</div>
+{% endblock %}

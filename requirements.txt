@@ -8,6 +8,9 @@ click==8.3.1
 cryptography==46.0.4
 dnspython==2.8.0
 flask==3.1.2
+flask-login==0.6.3
+flask-sqlalchemy==3.1.1
+flask-wtf==1.2.2
 gunicorn==25.0.3
 itsdangerous==2.2.0
 jinja2==3.1.6
@@ -15,9 +18,13 @@ jmespath==1.1.0
 markupsafe==3.0.3
 pycparser==2.22
 pyopenssl==25.3.0
+pyotp==2.9.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
+qrcode==8.2
 s3transfer==0.16.0
 six==1.17.0
 urllib3==2.6.3
 werkzeug==3.1.5
+pytest==8.3.5
+ruff==0.15.0

@@ -28,134 +28,219 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-# TODO 
-# - allow for wildcard
-
 from flask import Flask, request, make_response
 from werkzeug.middleware.proxy_fix import ProxyFix
-from os import environ
-from os import path
-from dotenv import load_dotenv
 import re
-import hmac
-import bcrypt
+import os
 
-basedir = path.abspath(path.dirname(__file__))
-load_dotenv(path.join(basedir, '.env'))
-
+from config import Config
+from models import db, Event
+from auth import login_manager, authenticate_dyndns_user
 from lib import log, AccountFactory
 
 
+def create_app(config_class=None):
+    app = Flask(__name__)
+    app.config.from_object(config_class or Config)
 
-ENV_VARS = [ 'USERNAME', 'PASSWORD']
+    # Ensure instance directory exists
+    os.makedirs(os.path.join(app.config['SQLALCHEMY_DATABASE_URI'].replace('sqlite:///', '').rsplit('/', 1)[0]), exist_ok=True)
 
-for ENV in ENV_VARS:
-    if not environ.get(ENV):
-        log.critical(f'Enviroment Variable = {ENV} is not set!')
-        exit (1)
-    else:
-        log.debug(f'Enviroment Variable {ENV} is set')
+    # Enable WAL mode for better concurrent access
+    def set_wal_mode(dbapi_conn, connection_record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute('PRAGMA journal_mode=WAL')
+        cursor.close()
 
-app = Flask(__name__)
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    db.init_app(app)
+    login_manager.init_app(app)
+
+    from sqlalchemy import event as sa_event
+    with app.app_context():
+        sa_event.listen(db.engine, 'connect', set_wal_mode)
+        for bind_key, engine in db.engines.items():
+            if bind_key is not None:
+                sa_event.listen(engine, 'connect', set_wal_mode)
+        db.create_all()
+
+        # One-time migration: add totp_secret column to users table
+        try:
+            db.session.execute(db.text('ALTER TABLE users ADD COLUMN totp_secret TEXT'))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    # Proxy fix for Traefik
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
+    # Register web UI blueprint
+    from web_routes import web_bp
+    app.register_blueprint(web_bp)
+
+    # Exempt /nic/update from CSRF
+    from flask_wtf.csrf import CSRFProtect
+    csrf = CSRFProtect(app)
+    csrf.exempt(nic_update_bp)
+
+    app.register_blueprint(nic_update_bp)
+
+    return app
+
+
+# Blueprint for the DynDNS update endpoint
+from flask import Blueprint  # noqa: E402
+nic_update_bp = Blueprint('nic_update', __name__)
 
 Accounts = AccountFactory()
+
 
 def httpReply(text, returncode=200):
     response = make_response(text, returncode)
     response.mimetype = "text/plain"
     return response
-    
-@app.route("/nic/update")
+
+
+def log_event(user, event_type, hostname=None, ip_address=None, backend_type=None, response=None, detail=None):
+    try:
+        ev = Event(
+            user_id=user.id,
+            username=user.username,
+            event_type=event_type,
+            hostname=hostname,
+            ip_address=ip_address,
+            backend_type=backend_type,
+            response=response,
+            detail=detail,
+        )
+        db.session.add(ev)
+        db.session.commit()
+    except Exception as e:
+        log.error(f'Failed to log event: {e}')
+        db.session.rollback()
+
+
+def find_user_domain(user, hostname, backend_type):
+    """Find the UserDomain that matches a hostname for a given backend type.
+    Returns the UserDomain whose domain_name is a suffix of hostname."""
+    best_match = None
+    for ud in user.domains:
+        if ud.backend_type != backend_type:
+            continue
+        if hostname.lower().endswith(ud.domain_name.lower()):
+            # Pick the longest matching domain (most specific)
+            if best_match is None or len(ud.domain_name) > len(best_match.domain_name):
+                best_match = ud
+    return best_match
+
+
+@nic_update_bp.route("/nic/update")
 def updateDydns():
     myip = request.args.get("myip")
-    
 
     hostnames = request.args.get("hostname")
-    
+
     auth = request.authorization
-    
-    
+
     if (auth):
-        username=auth.username
-        password=auth.password
+        username = auth.username
+        password = auth.password
     else:
         username = request.args.get("username")
         password = request.args.get("password")
         if username or password:
-            log.warning(f'credentials passed via query parameters - use HTTP Basic Auth instead')
-    
+            log.warning('credentials passed via query parameters - use HTTP Basic Auth instead')
 
-    url = re.sub(r"password=[^\&]*","password=********", request.url)
+    url = re.sub(r"password=[^\&]*", "password=********", request.url)
     ip = request.remote_addr
 
     if not myip:
         myip = ip
-    
 
-    if (password and username):
-        hashed_password = str(environ.get('PASSWORD'))
-        valid_user = hmac.compare_digest(environ.get('USERNAME'), username)
-        valid_pass = bcrypt.checkpw(password.encode('utf8'), hashed_password.encode())
-        if not valid_user or not valid_pass:
-            log.critical(f'invalid username or password')
-            return httpReply("badauth")
-    else:
-        log.critical(f'invalid username or password')
+    # Authenticate against database
+    user = authenticate_dyndns_user(username, password)
+    if not user:
+        log.critical('invalid username or password')
         return httpReply("badauth")
 
     updatetype = request.args.get("updatetype", default="aws")
-    
-    account = Accounts.get({"service": updatetype})
-    
-    if (not account):
-        log.critical(f'invalid updatetype')
-        return httpReply("badauth")
 
-    ip = account.getip(ip)
-    myip = account.getip(myip)
-
-    log.info (f'received request from {ip} to host: {request.host}  url: {url}')
+    log.info(f'received request from {ip} to host: {request.host}  url: {url}')
 
     if not myip or not hostnames:
         log.critical(f'invalid IP address {myip} or hostnames {hostnames}')
         return httpReply("911")
 
-    log.info (f'received request from user {username} for myip = {myip}, hostname = {hostnames}')
+    log.info(f'received request from user {username} for myip = {myip}, hostname = {hostnames}')
 
-    ipType = account.getiptype(myip)
-    
-    if (not ipType):
+    # Use a temporary account to validate IP and hostnames
+    temp_account = Accounts.get({"service": updatetype, "domains": [], "credentials": {}})
+    if not temp_account:
+        log.critical('invalid updatetype')
+        return httpReply("badauth")
+
+    validated_ip = temp_account.getip(myip)
+    if not validated_ip:
         log.critical(f'invalid IP address {myip}')
         return httpReply("911")
-        
-    hostnamesObj = account.isvalidhostname(hostnames)
-    
-    if (not hostnamesObj):
-        log.critical(f'invalid hostname {hostnames}')
-        return httpReply("notfqdn")
-    
-    hostname_zones = account.hostnameperzone(hostnamesObj)
-    
-    if not hostname_zones:
-        return httpReply("nohost")
-    
-    log.debug(f'hostnames per zone {hostname_zones}')
-    
-    
-    results = account.createrecords(str(myip), hostname_zones, rtype=ipType)
 
-    if not results:
-        log.critical(f'account.createrecords returned no results')
+    ipType = temp_account.getiptype(validated_ip)
+    if not ipType:
+        log.critical(f'invalid IP address {validated_ip}')
         return httpReply("911")
 
+    hostnamesObj = temp_account.isvalidhostname(hostnames)
+    if not hostnamesObj:
+        log.critical(f'invalid hostname {hostnames}')
+        return httpReply("notfqdn")
+
+    # Process each hostname against its own domain + credentials
     lines = []
     for hostname in hostnamesObj:
-        status = results.get(hostname, "dnserr")
-        lines.append(f"{status} {myip}")
+        ud = find_user_domain(user, hostname, updatetype)
+        if not ud:
+            log.warning(f'hostname {hostname} does not match any domain for user {username} backend {updatetype}')
+            lines.append(f"nohost {validated_ip}")
+            log_event(user, 'dns_update', hostname=hostname, ip_address=str(validated_ip),
+                      backend_type=updatetype, response='nohost')
+            continue
+
+        creds = ud.get_credentials()
+        if not creds:
+            log.warning(f'no credentials for domain {ud.domain_name} backend {updatetype} user {username}')
+            lines.append(f"911 {validated_ip}")
+            log_event(user, 'dns_update', hostname=hostname, ip_address=str(validated_ip),
+                      backend_type=updatetype, response='911')
+            continue
+
+        account_dict = {
+            "service": updatetype,
+            "domains": [ud.domain_name],
+            "credentials": creds,
+        }
+        account = Accounts.get(account_dict)
+        if not account:
+            lines.append(f"911 {validated_ip}")
+            log_event(user, 'dns_update', hostname=hostname, ip_address=str(validated_ip),
+                      backend_type=updatetype, response='911')
+            continue
+
+        hostname_zones = account.hostnameperzone([hostname])
+        if not hostname_zones:
+            lines.append(f"nohost {validated_ip}")
+            log_event(user, 'dns_update', hostname=hostname, ip_address=str(validated_ip),
+                      backend_type=updatetype, response='nohost')
+            continue
+
+        results = account.createrecords(str(validated_ip), hostname_zones, rtype=ipType)
+        status = results.get(hostname, "dnserr") if results else "dnserr"
+        lines.append(f"{status} {validated_ip}")
+        log_event(user, 'dns_update', hostname=hostname, ip_address=str(validated_ip),
+                  backend_type=updatetype, response=status)
 
     return httpReply("\n".join(lines))
 
+
+app = create_app()
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
-

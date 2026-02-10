@@ -16,20 +16,24 @@
 services:
   traefik:
     image: traefik:v3.3
-    network_mode: host
     command:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:${HTTP_PORT:-80}"
+      - "--entrypoints.web.address=:80"
       - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
-      - "--entrypoints.websecure.address=:${HTTPS_PORT:-443}"
+      - "--entrypoints.websecure.address=:443"
       - "--certificatesresolvers.letsencrypt.acme.email=${LETSENCRYPT_EMAIL}"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
       - "--certificatesresolvers.letsencrypt.acme.caserver=${LETSENCRYPT_CASERVER:-https://acme-v02.api.letsencrypt.org/directory}"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
     volumes:
       - letsencrypt:/letsencrypt
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - web-network
     restart: always
 
   web:
@@ -46,7 +50,14 @@ services:
       - "traefik.http.routers.dyndns.entrypoints=websecure"
       - "traefik.http.routers.dyndns.tls.certresolver=letsencrypt"
       - "traefik.http.services.dyndns.loadbalancer.server.port=80"
+      - "traefik.docker.network=web-network"
+    networks:
+      - web-network
     restart: always
+
+networks:
+  web-network:
+    driver: bridge
 
 volumes:
   letsencrypt:

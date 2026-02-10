@@ -16,13 +16,17 @@
         <button type="submit" class="btn btn-outline-primary">Filter</button>
         <a href="{{ url_for('web.event_list') }}" class="btn btn-outline-secondary">Clear</a>
     </div>
+    {% if current_user.is_admin %}
+    <div class="col-auto ms-auto">
+        <button type="submit" form="clear-events" class="btn btn-outline-danger btn-sm"
+                onclick="return confirm('Delete all events? This cannot be undone.')">Delete all events</button>
+    </div>
+    {% endif %}
 </form>
 
 {% if current_user.is_admin %}
-<form method="POST" action="{{ url_for('web.event_clear') }}" class="mb-4"
-      onsubmit="return confirm('Delete all events? This cannot be undone.')">
+<form id="clear-events" method="POST" action="{{ url_for('web.event_clear') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button type="submit" class="btn btn-outline-danger btn-sm">Delete all events</button>
 </form>
 {% endif %}
 

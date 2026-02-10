@@ -14,6 +14,12 @@
 #   ./scripts/backup.sh --restore ./backups/
 #   ./scripts/backup.sh --restore ./backups/ --local
 #
+# Silent mode (errors only, for cron):
+#   ./scripts/backup.sh --quiet
+#
+# Keep only last 5 backups:
+#   ./scripts/backup.sh --keep 5
+#
 
 set -euo pipefail
 
@@ -28,6 +34,8 @@ MODE="docker"
 ACTION="backup"
 OUTPUT_DIR="./backups"
 RESTORE_DIR=""
+QUIET=false
+KEEP=0
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 
 DOCKER_CONTAINER_DB_DIR="/app/instance"
@@ -40,6 +48,8 @@ while [[ $# -gt 0 ]]; do
         --local)   MODE="local"; shift ;;
         --output)  OUTPUT_DIR="$2"; shift 2 ;;
         --restore) ACTION="restore"; RESTORE_DIR="$2"; shift 2 ;;
+        --quiet|-q) QUIET=true; shift ;;
+        --keep)    KEEP="$2"; shift 2 ;;
         --help|-h) ACTION="help"; shift ;;
         *)         echo -e "${RED}Unknown option: $1${NC}"; exit 1 ;;
     esac
@@ -56,6 +66,8 @@ if [[ "$ACTION" == "help" ]]; then
     echo "  --local              Use local instance/ directory instead of Docker"
     echo "  --output DIR         Backup output directory (default: ./backups/)"
     echo "  --restore DIR        Restore from the most recent backup in DIR"
+    echo "  --keep N             Keep the last N backups per database, delete older ones"
+    echo "  -q, --quiet          Only print errors (for cron jobs)"
     echo "  -h, --help           Show this help message"
     echo
     echo "Examples:"
@@ -68,9 +80,9 @@ if [[ "$ACTION" == "help" ]]; then
 fi
 
 # --- Helpers ---
-info()  { echo -e "${GREEN}[INFO]${NC}  $1"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC}  $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+info()  { $QUIET || echo -e "${GREEN}[INFO]${NC}  $1"; }
+warn()  { $QUIET || echo -e "${YELLOW}[WARN]${NC}  $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1" >&2; exit 1; }
 
 file_size() {
     local size
@@ -101,11 +113,19 @@ do_backup() {
             local container_tmp="/tmp/${db}-backup.db"
 
             info "Backing up ${db}.db via Docker..."
-            docker compose exec -T web sqlite3 "$container_db" ".backup ${container_tmp}" \
-                || error "Failed to create backup of ${db}.db in container"
-            docker compose cp "web:${container_tmp}" "$backup_file" \
-                || error "Failed to copy ${db} backup from container"
-            docker compose exec -T web rm -f "$container_tmp"
+            if $QUIET; then
+                docker compose exec -T web sqlite3 "$container_db" ".backup ${container_tmp}" 2>/dev/null \
+                    || error "Failed to create backup of ${db}.db in container"
+                docker compose cp "web:${container_tmp}" "$backup_file" 2>/dev/null \
+                    || error "Failed to copy ${db} backup from container"
+                docker compose exec -T web rm -f "$container_tmp" 2>/dev/null
+            else
+                docker compose exec -T web sqlite3 "$container_db" ".backup ${container_tmp}" \
+                    || error "Failed to create backup of ${db}.db in container"
+                docker compose cp "web:${container_tmp}" "$backup_file" \
+                    || error "Failed to copy ${db} backup from container"
+                docker compose exec -T web rm -f "$container_tmp"
+            fi
         else
             local local_db="${LOCAL_DB_DIR}/${db}.db"
             if [[ ! -f "$local_db" ]]; then
@@ -120,7 +140,22 @@ do_backup() {
         info "  -> ${backup_file} ($(file_size "$backup_file"))"
     done
 
-    echo
+    # Prune old backups if --keep is set
+    if [[ "$KEEP" -gt 0 ]]; then
+        info "Pruning backups, keeping last ${KEEP} per database..."
+        for db in "${DATABASES[@]}"; do
+            local old_files
+            old_files=$(ls -t "${OUTPUT_DIR}"/${db}-*.db 2>/dev/null | tail -n +$((KEEP + 1)))
+            if [[ -n "$old_files" ]]; then
+                local count
+                count=$(echo "$old_files" | wc -l | tr -d ' ')
+                echo "$old_files" | xargs rm -f
+                info "  -> deleted ${count} old ${db} backup(s)"
+            fi
+        done
+    fi
+
+    $QUIET || echo
     info "Backup complete. Files in ${OUTPUT_DIR}/"
 }
 
@@ -130,7 +165,7 @@ do_restore() {
     [[ ! -d "$RESTORE_DIR" ]] && error "Restore directory not found: ${RESTORE_DIR}"
 
     info "Starting restore from ${RESTORE_DIR} (mode: ${MODE})"
-    echo
+    $QUIET || echo
 
     for db in "${DATABASES[@]}"; do
         # Find the most recent backup file for this database
@@ -162,7 +197,7 @@ do_restore() {
         info "  -> ${db}.db restored successfully"
     done
 
-    echo
+    $QUIET || echo
     info "Restore complete."
     warn "If you are running in Docker, restart the containers: docker compose restart"
 }

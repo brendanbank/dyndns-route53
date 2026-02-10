@@ -171,7 +171,7 @@ Docker Compose runs Traefik (TLS via Let's Encrypt HTTP-01 challenge) in front o
 
 The `instance/` directory (SQLite databases) is persisted via a Docker named volume (`dyndns-data:/app/instance`). Use `scripts/backup.sh` to back up and restore these databases safely (WAL-mode safe, works while the app is running).
 
-Traefik uses `network_mode: host` to preserve real client IPs (Docker's userland-proxy rewrites source IPs to the bridge gateway). With host networking, `ports:` is not used — entrypoint addresses use `${HTTP_PORT:-80}` and `${HTTPS_PORT:-443}` directly.
+Traefik and the web container share a `web-network` bridge network. To preserve real client IPs, the Docker daemon must have `"userland-proxy": false` in `/etc/docker/daemon.json` (Docker's default userland-proxy rewrites source IPs to the bridge gateway). With this setting, iptables NAT preserves source IPs and Traefik correctly populates `X-Forwarded-For`. Port mapping uses `${HTTP_PORT:-80}:80` and `${HTTPS_PORT:-443}:443`.
 
 Gunicorn access log uses a custom format with `%(U)s` (path only) instead of `%(r)s` (full request line) to prevent passwords in query parameters from appearing in logs.
 

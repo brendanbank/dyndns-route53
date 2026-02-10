@@ -10,6 +10,10 @@
 # Traefik handles TLS automatically via Let's Encrypt.
 # HTTP (port 80) redirects to HTTPS (port 443).
 #
+# Important: To preserve real client IPs, disable Docker's userland-proxy:
+#   echo '{"userland-proxy": false}' | sudo tee /etc/docker/daemon.json
+#   sudo systemctl restart docker
+#
 # Test with curl:
 #   curl -k -u ${USERNAME}:${PASSWORD} "https://${TRAEFIK_HOSTNAME}:${HTTPS_PORT}/nic/update?hostname=test.dyn.example.com&myip=203.0.113.1"
 

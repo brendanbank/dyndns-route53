@@ -82,6 +82,30 @@ dns_lookup() {
     dig +short @"${NAMESERVER}" "$1" A 2>/dev/null | head -1
 }
 
+dns_lookup_retry() {
+    # Retry dns_lookup up to $2 times (default 6) with $3 sec delay (default 5)
+    local hostname="$1"
+    local expected="${2:-}"
+    local retries="${3:-6}"
+    local delay="${4:-5}"
+    local ip
+    for ((i = 1; i <= retries; i++)); do
+        ip=$(dns_lookup "$hostname")
+        if [ -z "$expected" ] && [ -z "$ip" ]; then
+            echo ""
+            return 0
+        elif [ -n "$expected" ] && [ "$ip" = "$expected" ]; then
+            echo "$ip"
+            return 0
+        fi
+        if [ "$i" -lt "$retries" ]; then
+            echo "  retry ${i}/${retries}: got '${ip:-<empty>}', waiting ${delay}s ..." >&2
+            sleep "$delay"
+        fi
+    done
+    echo "$ip"
+}
+
 cleanup() {
     # Best-effort delete of the test record on exit
     echo
@@ -90,8 +114,7 @@ cleanup() {
         "${BASE_URL}/nic/delete?hostname=${TEST_HOSTNAME}")
     echo "  cleanup response: ${body}"
     # Wait for DNS propagation and verify
-    sleep 2
-    ip=$(dns_lookup "${TEST_HOSTNAME}")
+    ip=$(dns_lookup_retry "${TEST_HOSTNAME}" "" 3 3)
     if [ -z "$ip" ]; then
         echo "  cleanup: DNS record removed"
     else
@@ -113,10 +136,9 @@ echo "--- Pre-cleanup ---"
 body=$(curl "${CURL_OPTS[@]}" -u "${USERNAME}:${PASSWORD}" \
     "${BASE_URL}/nic/delete?hostname=${TEST_HOSTNAME}")
 echo "  pre-cleanup response: ${body}"
-sleep 2
 
 # Verify record does not exist
-ip=$(dns_lookup "${TEST_HOSTNAME}")
+ip=$(dns_lookup_retry "${TEST_HOSTNAME}" "")
 if [ -z "$ip" ]; then
     pass "Pre-cleanup: no DNS record for ${TEST_HOSTNAME}"
 else
@@ -134,13 +156,10 @@ else
     fail "/nic/update -> expected good (got: ${body})"
 fi
 
-# Wait for DNS propagation across all backends
-sleep 10
-
 # --- Step 3: Verify A record exists ---
 echo
 echo "--- Verify record ---"
-ip=$(dns_lookup "${TEST_HOSTNAME}")
+ip=$(dns_lookup_retry "${TEST_HOSTNAME}" "${MYIP}")
 if [ "$ip" = "$MYIP" ]; then
     pass "DNS A record resolves to ${MYIP}"
 else
@@ -169,13 +188,10 @@ else
     fail "/nic/delete -> expected good (got: ${body})"
 fi
 
-# Wait for DNS propagation
-sleep 10
-
 # --- Step 6: Verify record is gone ---
 echo
 echo "--- Verify deletion ---"
-ip=$(dns_lookup "${TEST_HOSTNAME}")
+ip=$(dns_lookup_retry "${TEST_HOSTNAME}" "")
 if [ -z "$ip" ]; then
     pass "DNS A record deleted (no longer resolves)"
 else

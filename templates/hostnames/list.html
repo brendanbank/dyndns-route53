@@ -10,6 +10,7 @@
             <tr>
                 <th>Hostname</th>
                 <th>Domain</th>
+                <th>Backends</th>
                 <th>Created</th>
                 <th>Actions</th>
             </tr>
@@ -19,15 +20,29 @@
             <tr>
                 <td>{{ hn.name }}</td>
                 <td>{{ hn.domain.name }}</td>
+                <td>
+                    {% if hn.backends %}
+                        {% for b in hn.backends %}
+                        <span class="badge bg-primary">{{ b.backend_type }}</span>
+                        {% endfor %}
+                    {% else %}
+                        <span class="badge bg-secondary">all</span>
+                        <small class="text-muted">({% for b in hn.domain.backends %}{{ b.backend_type }}{% if not loop.last %}, {% endif %}{% endfor %})</small>
+                    {% endif %}
+                </td>
                 <td>{{ hn.created_at.strftime('%Y-%m-%d') if hn.created_at else '' }}</td>
                 <td>
                     {% if is_admin_view %}
+                    <a href="{{ url_for('web.user_hostname_backends', user_id=user.id, hn_id=hn.id) }}"
+                       class="btn btn-sm btn-outline-secondary">Backends</a>
                     <form method="POST" action="{{ url_for('web.user_hostname_delete', user_id=user.id, hn_id=hn.id) }}"
                           style="display:inline" onsubmit="return confirm('Remove this hostname?')">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
                     </form>
                     {% else %}
+                    <a href="{{ url_for('web.my_hostname_backends', hn_id=hn.id) }}"
+                       class="btn btn-sm btn-outline-secondary">Backends</a>
                     <form method="POST" action="{{ url_for('web.my_hostname_delete', hn_id=hn.id) }}"
                           style="display:inline" onsubmit="return confirm('Remove this hostname?')">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

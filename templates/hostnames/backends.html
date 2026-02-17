@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Backends for {{ hostname.name }} - DynDNS Admin{% endblock %}
+{% block content %}
+<h2>Backend Configuration for {{ hostname.name }}</h2>
+
+<p class="text-muted">
+    Select which backends to update when this hostname is updated.
+    If no backends are selected, all domain backends will be used.
+</p>
+
+<div class="row">
+    <div class="col-md-6">
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            {% if domain_backends %}
+            <div class="mb-3">
+                <label class="form-label">Available Backends</label>
+                {% for backend in domain_backends %}
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="backend_ids"
+                           value="{{ backend.id }}" id="backend_{{ backend.id }}"
+                           {% if backend in hostname.backends %}checked{% endif %}>
+                    <label class="form-check-label" for="backend_{{ backend.id }}">
+                        {{ backend.backend_type }}
+                        {% if backend.has_credentials %}
+                        <span class="badge bg-success">configured</span>
+                        {% else %}
+                        <span class="badge bg-warning text-dark">no credentials</span>
+                        {% endif %}
+                    </label>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="alert alert-warning">
+                No backends configured for domain {{ hostname.domain.name }}.
+            </div>
+            {% endif %}
+
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary">Save</button>
+                {% if is_admin_view %}
+                <a href="{{ url_for('web.user_hostnames', user_id=user.id) }}" class="btn btn-outline-secondary">Back to Hostnames</a>
+                {% else %}
+                <a href="{{ url_for('web.my_hostnames') }}" class="btn btn-outline-secondary">Back to Hostnames</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="mt-3">
+    <small class="text-muted">
+        Currently using:
+        {% if hostname.backends %}
+            {% for b in hostname.backends %}{{ b.backend_type }}{% if not loop.last %}, {% endif %}{% endfor %}
+        {% else %}
+            all domain backends ({% for b in hostname.domain.backends %}{{ b.backend_type }}{% if not loop.last %}, {% endif %}{% endfor %})
+        {% endif %}
+    </small>
+</div>
+{% endblock %}

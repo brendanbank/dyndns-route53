@@ -74,6 +74,20 @@ def create_app(config_class=None):
         except Exception:
             db.session.rollback()
 
+        # One-time migration: populate hostname_backends for existing hostnames
+        # This ensures all existing hostnames have all their domain backends enabled
+        try:
+            hostnames_without_backends = Hostname.query.filter(~Hostname.backends.any()).all()
+            if hostnames_without_backends:
+                for hn in hostnames_without_backends:
+                    # Enable all domain backends for this hostname
+                    hn.backends = list(hn.domain.backends)
+                db.session.commit()
+                log.info(f'Migration: enabled all backends for {len(hostnames_without_backends)} existing hostname(s).')
+        except Exception as e:
+            db.session.rollback()
+            log.warning(f'Migration hostname_backends skipped: {e}')
+
         # Create admin user on first boot if none exists
         if not app.config.get('TESTING'):
             admin = User.query.filter_by(role='admin').first()
@@ -230,16 +244,16 @@ def updateDydns():
             continue
 
         domain = hn.domain
-        backends = domain.backends
+        backends = hn.get_backends()
 
         if not backends:
-            log.warning(f'no backends configured for domain {domain.name}')
+            log.warning(f'no backends configured for hostname {hostname}')
             lines.append(f"911 {validated_ip}")
             log_event(user, 'dns_update', hostname=hostname, ip_address=str(validated_ip),
                       backend_type=None, response='911')
             continue
 
-        # Try all backends for this hostname's domain
+        # Try all backends for this hostname (hostname-specific or all domain backends)
         results = []
         for db_backend in backends:
             creds = db_backend.get_credentials()
@@ -351,16 +365,16 @@ def deleteDyndns():
             continue
 
         domain = hn.domain
-        backends = domain.backends
+        backends = hn.get_backends()
 
         if not backends:
-            log.warning(f'no backends configured for domain {domain.name}')
+            log.warning(f'no backends configured for hostname {hostname}')
             lines.append("911")
             log_event(user, 'dns_delete', hostname=hostname,
                       ip_address=myip, backend_type=None, response='911')
             continue
 
-        # Try all backends for this hostname's domain
+        # Try all backends for this hostname (hostname-specific or all domain backends)
         results = []
         for db_backend in backends:
             creds = db_backend.get_credentials()

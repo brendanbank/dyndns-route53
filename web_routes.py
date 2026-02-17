@@ -391,6 +391,31 @@ def user_hostname_delete(user_id, hn_id):
     return redirect(url_for('web.user_hostnames', user_id=user_id))
 
 
+@web_bp.route('/admin/users/<int:user_id>/hostnames/<int:hn_id>/backends', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def user_hostname_backends(user_id, hn_id):
+    """Admin: configure which backends a hostname uses."""
+    user = User.query.get_or_404(user_id)
+    hn = Hostname.query.get_or_404(hn_id)
+    if hn.user_id != user.id:
+        flash('Hostname does not belong to this user.', 'danger')
+        return redirect(url_for('web.user_hostnames', user_id=user_id))
+
+    domain_backends = hn.domain.backends
+
+    if request.method == 'POST':
+        selected_ids = request.form.getlist('backend_ids', type=int)
+        # Clear and set new backends
+        hn.backends = [b for b in domain_backends if b.id in selected_ids]
+        db.session.commit()
+        flash(f'Backend configuration for "{hn.name}" updated.', 'success')
+        return redirect(url_for('web.user_hostnames', user_id=user_id))
+
+    return render_template('hostnames/backends.html', user=user, hostname=hn,
+                           domain_backends=domain_backends, is_admin_view=True)
+
+
 # --- Hostname Management (User self-service) ---
 
 @web_bp.route('/admin/hostnames', methods=['GET', 'POST'])
@@ -431,6 +456,29 @@ def my_hostname_delete(hn_id):
     db.session.commit()
     flash('Hostname removed.', 'success')
     return redirect(url_for('web.my_hostnames'))
+
+
+@web_bp.route('/admin/hostnames/<int:hn_id>/backends', methods=['GET', 'POST'])
+@login_required
+def my_hostname_backends(hn_id):
+    """User self-service: configure which backends a hostname uses."""
+    hn = Hostname.query.get_or_404(hn_id)
+    if hn.user_id != current_user.id and not current_user.is_admin:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('web.my_hostnames'))
+
+    domain_backends = hn.domain.backends
+
+    if request.method == 'POST':
+        selected_ids = request.form.getlist('backend_ids', type=int)
+        # Clear and set new backends
+        hn.backends = [b for b in domain_backends if b.id in selected_ids]
+        db.session.commit()
+        flash(f'Backend configuration for "{hn.name}" updated.', 'success')
+        return redirect(url_for('web.my_hostnames'))
+
+    return render_template('hostnames/backends.html', user=current_user, hostname=hn,
+                           domain_backends=domain_backends, is_admin_view=False)
 
 
 # --- Events ---

@@ -92,6 +92,14 @@ class DomainBackend(db.Model):
         return len(self.configs) > 0
 
 
+# Association table for hostname-specific backend selection
+hostname_backends = db.Table(
+    'hostname_backends',
+    db.Column('hostname_id', db.Integer, db.ForeignKey('hostnames.id', ondelete='CASCADE'), primary_key=True),
+    db.Column('domain_backend_id', db.Integer, db.ForeignKey('domain_backends.id', ondelete='CASCADE'), primary_key=True)
+)
+
+
 class Hostname(db.Model):
     __tablename__ = 'hostnames'
 
@@ -103,6 +111,14 @@ class Hostname(db.Model):
 
     domain = db.relationship('Domain', back_populates='hostnames')
     user = db.relationship('User', back_populates='hostnames')
+    # Optional: specific backends for this hostname. If empty, use all domain backends.
+    backends = db.relationship('DomainBackend', secondary=hostname_backends, backref='hostnames')
+
+    def get_backends(self):
+        """Return hostname-specific backends if configured, otherwise all domain backends."""
+        if self.backends:
+            return self.backends
+        return self.domain.backends
 
 
 class BackendConfig(db.Model):

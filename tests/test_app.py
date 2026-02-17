@@ -564,6 +564,107 @@ class TestHostnameManagement:
 
 
 # ==============================================================================
+# Hostname Backend Selection
+# ==============================================================================
+
+class TestHostnameBackendSelection:
+
+    def _login_admin(self, client, admin_user, admin_with_totp):
+        login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
+
+    def test_hostname_backends_page_loads(self, client, admin_user, admin_with_totp, regular_user, test_hostname, test_domain_with_backend):
+        """Admin can access hostname backends config page."""
+        self._login_admin(client, admin_user, admin_with_totp)
+        resp = client.get(f'/admin/users/{regular_user}/hostnames/{test_hostname}/backends')
+        assert resp.status_code == 200
+        assert b'Backend Configuration' in resp.data
+
+    def test_select_specific_backend(self, client, admin_user, admin_with_totp, regular_user, test_hostname, test_domain_with_backend, app):
+        """Admin can select specific backends for a hostname."""
+        self._login_admin(client, admin_user, admin_with_totp)
+        resp = client.post(f'/admin/users/{regular_user}/hostnames/{test_hostname}/backends', data={
+            'backend_ids': test_domain_with_backend,
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        from models import Hostname
+        with app.app_context():
+            hn = Hostname.query.get(test_hostname)
+            assert len(hn.backends) == 1
+            assert hn.backends[0].id == test_domain_with_backend
+
+    def test_clear_backend_selection(self, client, admin_user, admin_with_totp, regular_user, test_hostname, test_domain_with_backend, app):
+        """Clearing backends reverts to using all domain backends."""
+        self._login_admin(client, admin_user, admin_with_totp)
+        # First select a backend
+        client.post(f'/admin/users/{regular_user}/hostnames/{test_hostname}/backends', data={
+            'backend_ids': test_domain_with_backend,
+        }, follow_redirects=True)
+        # Then clear selection
+        resp = client.post(f'/admin/users/{regular_user}/hostnames/{test_hostname}/backends', data={
+            # No backend_ids submitted means empty list
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        from models import Hostname
+        with app.app_context():
+            hn = Hostname.query.get(test_hostname)
+            assert len(hn.backends) == 0  # Empty means use all domain backends
+
+    def test_get_backends_returns_specific_when_set(self, app, test_hostname, test_domain_with_backend):
+        """Hostname.get_backends() returns specific backends when configured."""
+        from models import db, Hostname, DomainBackend
+        with app.app_context():
+            hn = Hostname.query.get(test_hostname)
+            backend = DomainBackend.query.get(test_domain_with_backend)
+            hn.backends = [backend]
+            db.session.commit()
+            # get_backends() should return the specific backend
+            result = hn.get_backends()
+            assert len(result) == 1
+            assert result[0].id == test_domain_with_backend
+
+    def test_get_backends_returns_all_domain_when_not_set(self, app, test_hostname, test_domain_with_backend):
+        """Hostname.get_backends() returns all domain backends when none specifically set."""
+        from models import Hostname
+        with app.app_context():
+            hn = Hostname.query.get(test_hostname)
+            assert len(hn.backends) == 0  # No specific backends
+            # get_backends() should return all domain backends
+            result = hn.get_backends()
+            assert len(result) == 1
+            assert result[0].id == test_domain_with_backend
+
+    def test_user_can_configure_own_hostname_backends(self, client, regular_user, regular_user_with_totp, test_hostname, test_domain_with_backend, app):
+        """User can configure backends for their own hostname."""
+        login_user_full(client, 'testuser', TEST_PASSWORD, totp_secret=regular_user_with_totp)
+        resp = client.get(f'/admin/hostnames/{test_hostname}/backends')
+        assert resp.status_code == 200
+        resp = client.post(f'/admin/hostnames/{test_hostname}/backends', data={
+            'backend_ids': test_domain_with_backend,
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        from models import Hostname
+        with app.app_context():
+            hn = Hostname.query.get(test_hostname)
+            assert len(hn.backends) == 1
+
+    def test_user_cannot_configure_others_hostname(self, client, admin_user, admin_with_totp, regular_user, regular_user_with_totp, test_hostname, app):
+        """User cannot access another user's hostname backends."""
+        # Create a hostname for admin
+        from models import db, Hostname, Domain
+        with app.app_context():
+            domain = Domain.query.first()
+            admin_hn = Hostname(name='admin.example.com', domain_id=domain.id, user_id=admin_user)
+            db.session.add(admin_hn)
+            db.session.commit()
+            admin_hn_id = admin_hn.id
+
+        # Login as regular user and try to access admin's hostname
+        login_user_full(client, 'testuser', TEST_PASSWORD, totp_secret=regular_user_with_totp)
+        resp = client.get(f'/admin/hostnames/{admin_hn_id}/backends', follow_redirects=True)
+        assert b'Access denied' in resp.data
+
+
+# ==============================================================================
 # Miscellaneous Routes
 # ==============================================================================
 

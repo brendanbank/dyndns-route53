@@ -62,12 +62,13 @@ Gunicorn uses the factory syntax `dyndns:create_app()` to create the app at work
 ### Data Model
 
 ```
-User 1---* Hostname *---1 Domain 1---* DomainBackend 1---* BackendConfig
+User 1---* Hostname *---* DomainBackend *---1 Domain
+                              1---* BackendConfig
 ```
 
 - **Domain** — global zone managed by admin (e.g. `dyn.bgwlan.nl`). Has backends and hostnames.
 - **DomainBackend** — backend config for a domain (aws/nsupdate). Unique constraint on `(domain_id, backend_type)`. Has credentials via BackendConfig.
-- **Hostname** — user-owned FQDN, globally unique (e.g. `myhost.dyn.bgwlan.nl`). Belongs to one domain and one user.
+- **Hostname** — user-owned FQDN, globally unique (e.g. `myhost.dyn.bgwlan.nl`). Belongs to one domain and one user. Has optional many-to-many relationship with backends via `hostname_backends` table.
 - **BackendConfig** — per-backend encrypted key-value pairs (e.g. `aws_access_key_id`). FK to `domain_backends`. Values Fernet-encrypted.
 - **User** — username, bcrypt password hash, role (`admin`/`user`), active flag, TOTP secret. Has hostnames.
 - **Event** — DNS update audit log (separate SQLite bind `events`). Records user, hostname, IP, backend, response.
@@ -77,7 +78,7 @@ User 1---* Hostname *---1 Domain 1---* DomainBackend 1---* BackendConfig
 `GET /nic/update` authenticates via HTTP Basic Auth (or query params) against the `users` table. For each hostname in the request:
 1. Look up `Hostname` record by exact name match + user ownership
 2. If not found → `nohost`
-3. Get all `DomainBackend` records for the hostname's domain
+3. Get backends for the hostname via `Hostname.get_backends()` — returns hostname-specific backends if configured, otherwise all domain backends
 4. For each backend: get Fernet-encrypted credentials, create account via `AccountFactory`, call `createrecords()`
 5. Log one `Event` per backend attempt
 6. Aggregate result: `good` if any backend succeeded, `nochg` if all unchanged, error otherwise

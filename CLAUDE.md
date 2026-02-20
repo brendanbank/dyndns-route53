@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A Dynamic DNS web service that implements the DynDNS v2 protocol (`/nic/update` and `/nic/delete` endpoints). It accepts DNS update and delete requests via HTTP and manages records through pluggable backends: AWS Route53 (via boto3) and BIND nsupdate (via dnspython TSIG). Designed to work with OPNsense's DynDNS client and other DynDNS v2-compatible clients.
+A Dynamic DNS web service that implements the DynDNS v2 protocol (`/nic/update` and `/nic/delete` endpoints). It accepts DNS update and delete requests via HTTP and manages records through pluggable backends: AWS Route53 (via boto3), BIND nsupdate (via dnspython TSIG), and Hetzner Cloud DNS (via REST API). Designed to work with OPNsense's DynDNS client and other DynDNS v2-compatible clients.
 
 Supports multi-user operation with global domains (admin-managed), per-domain backends with shared credentials, user-owned hostnames, and a Bootstrap 5 web UI for administration.
 
@@ -67,7 +67,7 @@ User 1---* Hostname *---* DomainBackend *---1 Domain
 ```
 
 - **Domain** — global zone managed by admin (e.g. `dyn.bgwlan.nl`). Has backends and hostnames.
-- **DomainBackend** — backend config for a domain (aws/nsupdate). Unique constraint on `(domain_id, backend_type)`. Has credentials via BackendConfig.
+- **DomainBackend** — backend config for a domain (aws/nsupdate/hetzner). Unique constraint on `(domain_id, backend_type)`. Has credentials via BackendConfig.
 - **Hostname** — user-owned FQDN, globally unique (e.g. `myhost.dyn.bgwlan.nl`). Belongs to one domain and one user. Has optional many-to-many relationship with backends via `hostname_backends` table.
 - **BackendConfig** — per-backend encrypted key-value pairs (e.g. `aws_access_key_id`). FK to `domain_backends`. Values Fernet-encrypted.
 - **User** — username, bcrypt password hash, role (`admin`/`user`), active flag, TOTP secret. Has hostnames.
@@ -92,6 +92,7 @@ The `updatetype` parameter is deprecated and ignored — all backends for the do
 - `lib/accounts.py` — `BaseAccount` base class and `AccountFactory`. The factory auto-discovers account classes from `lib/account/*.py` at startup via `importlib`. Each backend subclass defines `_services` (list of service names), `match()`, `createrecords()`, and `deleterecords()`.
 - `lib/account/aws.py` — `AWS` class: updates/deletes Route53 records via boto3. Reads credentials from `account['credentials']` dict (DB-backed) with env var fallback.
 - `lib/account/nsupdate.py` — `nsupdate` class: updates/deletes BIND DNS records via TSIG-authenticated `dns.update`/`dns.query.tcp`. Same credential pattern.
+- `lib/account/hetzner.py` — `Hetzner` class: updates/deletes DNS records via the Hetzner Cloud API (`api.hetzner.cloud/v1`). Uses Bearer token auth and RRSet-based operations (records identified by `name/type`). Updates use the `set_records` action endpoint. Same credential pattern (`HETZNER_API_TOKEN` env var fallback).
 
 Backend plugins accept domains from `account['domains']` and credentials from `account['credentials']`, falling back to environment variables for backward compatibility.
 
@@ -136,7 +137,7 @@ Configured in `.env` (loaded via python-dotenv):
 
 **Traefik:** `TRAEFIK_HOSTNAME`, `LETSENCRYPT_EMAIL`, `LETSENCRYPT_CASERVER`, `HTTP_PORT`, `HTTPS_PORT`
 
-**Legacy (backward compat / migration):** `USERNAME`, `PASSWORD`, `DOMAINS`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `NSUPDATE_KEY`, `NSUPDATE_ALGO`, `NSUPDATE_SECRET`, `NSUPDATE_NAMESERVER`
+**Legacy (backward compat / migration):** `USERNAME`, `PASSWORD`, `DOMAINS`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `NSUPDATE_KEY`, `NSUPDATE_ALGO`, `NSUPDATE_SECRET`, `NSUPDATE_NAMESERVER`, `HETZNER_API_TOKEN`
 
 ## CI/CD
 
@@ -182,7 +183,7 @@ There are two compose files:
 
 ## Testing
 
-**Pytest (77 functional tests):**
+**Pytest (107 tests):**
 ```
 python -m pytest tests/ -v
 ```

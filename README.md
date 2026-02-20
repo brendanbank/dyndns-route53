@@ -4,6 +4,7 @@ A Dynamic DNS web service that implements the [DynDNS v2 protocol](https://help.
 
 - **AWS Route53** — updates hosted zones via the AWS API (boto3)
 - **BIND nsupdate** — updates DNS via TSIG-authenticated dynamic updates (dnspython)
+- **Hetzner Cloud DNS** — updates zones via the Hetzner Cloud API (requests)
 
 Supports multi-user operation with global admin-managed domains, per-user hostnames, per-domain backends with Fernet-encrypted credentials in SQLite, and a Bootstrap 5 web UI for administration with mandatory TOTP two-factor authentication.
 

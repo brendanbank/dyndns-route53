@@ -25,9 +25,14 @@ NSUPDATE_CONFIG_KEYS = [
     ('nsupdate_nameserver', 'Nameserver'),
 ]
 
+HETZNER_CONFIG_KEYS = [
+    ('hetzner_api_token', 'Hetzner DNS API Token'),
+]
+
 BACKEND_CONFIG_KEYS = {
     'aws': AWS_CONFIG_KEYS,
     'nsupdate': NSUPDATE_CONFIG_KEYS,
+    'hetzner': HETZNER_CONFIG_KEYS,
 }
 
 

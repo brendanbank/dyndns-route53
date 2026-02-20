@@ -5,7 +5,7 @@ import qrcode
 import qrcode.image.svg
 from flask import Blueprint, render_template, redirect, url_for, flash, request, session
 from flask_login import login_user, logout_user, login_required, current_user
-from models import db, User, Domain, DomainBackend, BackendConfig, Hostname, Event, encrypt_value, decrypt_value
+from models import db, User, Domain, DomainBackend, BackendConfig, Hostname, Event, encrypt_value
 from forms import LoginForm, UserForm, PasswordChangeForm, TOTPVerifyForm, TOTPSetupForm, DomainForm, HostnameForm
 from auth import admin_required, authenticate_dyndns_user
 
@@ -317,31 +317,24 @@ def domain_backend_config(domain_id, db_id):
     if request.method == 'POST':
         for key, label in config_keys:
             value = request.form.get(key, '').strip()
-            if value:
+            clear = request.form.get(f'{key}_clear')
+            if clear and key in existing:
+                db.session.delete(existing[key])
+            elif value:
                 if key in existing:
                     existing[key].config_value = encrypt_value(value)
                 else:
                     cfg = BackendConfig(domain_backend_id=db_backend.id,
                                         config_key=key, config_value=encrypt_value(value))
                     db.session.add(cfg)
-            elif key in existing:
-                db.session.delete(existing[key])
         db.session.commit()
         flash(f'Credentials for "{domain.name}" ({db_backend.backend_type}) updated.', 'success')
         return redirect(url_for('web.domain_backend_config', domain_id=domain.id, db_id=db_backend.id))
 
-    current_values = {}
-    for key, label in config_keys:
-        if key in existing:
-            try:
-                current_values[key] = decrypt_value(existing[key].config_value)
-            except Exception:
-                current_values[key] = ''
-        else:
-            current_values[key] = ''
+    has_value = {key for key, label in config_keys if key in existing}
 
     return render_template('domains/backend_config.html', domain=domain, db_backend=db_backend,
-                           config_keys=config_keys, current_values=current_values)
+                           config_keys=config_keys, has_value=has_value)
 
 
 @web_bp.route('/admin/domains/<int:domain_id>/backends/<int:db_id>/delete', methods=['POST'])

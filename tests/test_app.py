@@ -497,6 +497,19 @@ class TestDomainManagement:
             configs = BackendConfig.query.filter_by(domain_backend_id=test_domain_with_backend).all()
             assert len(configs) == 2
 
+    def test_backend_config_does_not_leak_credentials(self, client, admin_user, admin_with_totp, test_domain, test_domain_with_backend, app):
+        """Saved credentials must never appear in plaintext on the config page."""
+        self._login_admin(client, admin_user, admin_with_totp)
+        secret = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
+        client.post(f'/admin/domains/{test_domain}/backends/{test_domain_with_backend}/config', data={
+            'aws_access_key_id': 'AKIAIOSFODNN7EXAMPLE',
+            'aws_secret_access_key': secret,
+        }, follow_redirects=True)
+        resp = client.get(f'/admin/domains/{test_domain}/backends/{test_domain_with_backend}/config')
+        assert resp.status_code == 200
+        assert secret.encode() not in resp.data
+        assert b'type="password"' in resp.data
+
 
 # ==============================================================================
 # Hostname Management

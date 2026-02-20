@@ -96,7 +96,8 @@ class TestHetznerZones:
         h = Hetzner(_make_account())
         assert 'example.com' in h._zones
         assert h._zones['example.com'] == 123
-        assert 'other.com' in h._zones
+        # other.com is in the API but not in account domains, so not mapped
+        assert 'other.com' not in h._zones
 
     @patch('lib.account.hetzner.requests.get')
     def test_gethostedzones_skips_reverse(self, mock_get):
@@ -121,6 +122,76 @@ class TestHetznerZones:
         h = Hetzner(account)
         # Should not raise
         assert 'example.com' in h._zones
+
+
+# --- Parent zone mapping tests ---
+
+def _mock_parent_zone_response():
+    """API zone 'example.com' is parent of app domain 'dyn.example.com'."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {
+        'zones': [
+            {'id': 840, 'name': 'example.com'},
+        ]
+    }
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
+class TestParentZoneMapping:
+    @patch('lib.account.hetzner.requests.get')
+    def test_parent_zone_maps_domain_to_api_zone_id(self, mock_get):
+        """App domain 'dyn.example.com' should use zone ID from parent 'example.com'."""
+        mock_get.return_value = _mock_parent_zone_response()
+        from lib.account.hetzner import Hetzner
+        h = Hetzner(_make_account(domains=['dyn.example.com']))
+        assert h._zones['dyn.example.com'] == 840
+        assert h._api_zone_names['dyn.example.com'] == 'example.com'
+
+    @patch('lib.account.hetzner.Hetzner.check_hostnameon_server', return_value=False)
+    @patch('lib.account.hetzner.requests.post')
+    @patch('lib.account.hetzner.requests.get')
+    def test_create_uses_correct_relative_name_for_parent_zone(self, mock_get, mock_post, mock_check):
+        """windtre.dyn.example.com under API zone example.com should use relative name 'windtre.dyn'."""
+        zones_resp = _mock_parent_zone_response()
+        rrset_404 = MagicMock()
+        rrset_404.status_code = 404
+        mock_get.side_effect = [zones_resp, rrset_404]
+
+        create_resp = MagicMock()
+        create_resp.status_code = 200
+        create_resp.raise_for_status = MagicMock()
+        mock_post.return_value = create_resp
+
+        from lib.account.hetzner import Hetzner
+        h = Hetzner(_make_account(domains=['dyn.example.com']))
+        result = h.createrecords('1.2.3.4', {'dyn.example.com': ['windtre.dyn.example.com']}, 'A')
+
+        assert result == {'windtre.dyn.example.com': 'good'}
+        call_args = mock_post.call_args
+        # Should use zone ID 840, not string 'dyn.example.com'
+        assert '/zones/840/' in call_args[0][0]
+        # Relative name should be 'windtre.dyn' (relative to API zone 'example.com')
+        assert call_args[1]['json']['name'] == 'windtre.dyn'
+
+    @patch('lib.account.hetzner.requests.delete')
+    @patch('lib.account.hetzner.requests.get')
+    def test_delete_uses_correct_relative_name_for_parent_zone(self, mock_get, mock_delete):
+        """Delete should also use the correct relative name for parent zones."""
+        mock_get.return_value = _mock_parent_zone_response()
+
+        delete_resp = MagicMock()
+        delete_resp.status_code = 200
+        delete_resp.raise_for_status = MagicMock()
+        mock_delete.return_value = delete_resp
+
+        from lib.account.hetzner import Hetzner
+        h = Hetzner(_make_account(domains=['dyn.example.com']))
+        result = h.deleterecords({'dyn.example.com': ['windtre.dyn.example.com']}, rtype='A')
+
+        assert result == {'windtre.dyn.example.com': 'good'}
+        assert '/zones/840/rrsets/windtre.dyn/A' in mock_delete.call_args[0][0]
 
 
 # --- Relative name tests ---

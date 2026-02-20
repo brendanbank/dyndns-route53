@@ -14,6 +14,7 @@ class Hetzner(BaseAccount):
 
     def __init__(self, account: dict):
         super().__init__(account)
+        self._api_zone_names = {}  # app domain -> actual Hetzner zone name
         self.gethostedzones()
 
     @staticmethod
@@ -57,13 +58,29 @@ class Hetzner(BaseAccount):
             return self._zones.keys()
 
         data = response.json()
+        api_zones = {}
         for zone in data.get('zones', []):
             name = zone['name']
             if 'in-addr.arpa' in name or 'ip6.arpa' in name:
                 continue
-            self._zones[name] = zone['id']
+            api_zones[name] = zone['id']
 
-        log.debug(f'_zones.keys = {self._zones.keys()}')
+        # For each app domain already in _zones, check if a Hetzner API zone
+        # matches or is a parent (e.g. app domain "dyn.bgwlan.nl" under API zone
+        # "bgwlan.nl"). Map the app domain to the Hetzner zone ID and remember
+        # the actual API zone name for relative name computation.
+        for domain in list(self._zones.keys()):
+            if domain in api_zones:
+                self._zones[domain] = api_zones[domain]
+                self._api_zone_names[domain] = domain
+            else:
+                for api_name, api_id in api_zones.items():
+                    if domain.endswith('.' + api_name):
+                        self._zones[domain] = api_id
+                        self._api_zone_names[domain] = api_name
+                        break
+
+        log.debug(f'_zones = {self._zones}')
         return self._zones.keys()
 
     def createrecords(self, IP, hostname_zones, rtype="A", ttl=300):
@@ -83,7 +100,8 @@ class Hetzner(BaseAccount):
                     results[hostname] = "nochg"
                     continue
 
-                relative_name = self._get_relative_name(hostname, zonename)
+                api_zone_name = self._api_zone_names.get(zonename, zonename)
+                relative_name = self._get_relative_name(hostname, api_zone_name)
 
                 try:
                     # Check if rrset already exists
@@ -136,7 +154,8 @@ class Hetzner(BaseAccount):
             zone_id = self._zones[zonename]
 
             for hostname in hostname_zones[zonename]:
-                relative_name = self._get_relative_name(hostname, zonename)
+                api_zone_name = self._api_zone_names.get(zonename, zonename)
+                relative_name = self._get_relative_name(hostname, api_zone_name)
                 deleted_any = False
 
                 try:

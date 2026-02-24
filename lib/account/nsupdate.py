@@ -32,7 +32,7 @@ class nsupdate(BaseAccount):
             'nsupdate_nameserver': creds.get('nsupdate_nameserver', environ.get('NSUPDATE_NAMESERVER')),
         }
 
-    def createrecords(self, IP, hostname_zones, rtype="A", ttl=300):
+    def createrecords(self, IP, hostname_zones, rtype="A", ttl=60):
         log.debug(f'self._zones {self._zones}')
 
         creds = self._get_credentials()

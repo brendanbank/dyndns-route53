@@ -52,7 +52,7 @@ class AWS(BaseAccount):
 
         return(self._zones.keys())
 
-    def createrecords(self, IP, hostname_zones, rtype="A", ttl=300):
+    def createrecords(self, IP, hostname_zones, rtype="A", ttl=60):
         creds = self._get_credentials()
         if not creds.get('aws_access_key_id') or not creds.get('aws_secret_access_key'):
             log.error('AWS credentials not configured — cannot create records')

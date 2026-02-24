@@ -224,11 +224,16 @@ class BaseAccount:
             rcode = response.rcode()
             if rcode != dns.rcode.NOERROR:
                 if rcode == dns.rcode.NXDOMAIN:
-                    log.critical('%s does not exist. dns.rcode = %s' % (sub,rcode ))
-                    return(None)
+                    if depth > 2:
+                        # No zone delegation at this level; the nameserver found at
+                        # the parent level is authoritative for this hostname.
+                        log.debug('No zone delegation at %s, using parent nameserver %s' % (sub, nameserver))
+                        return nameserver
+                    log.critical('%s does not exist. dns.rcode = %s' % (sub, rcode))
+                    return None
                 else:
-                    log.critica('Error %s' % dns.rcode.to_text(rcode))
-                    return(None)
+                    log.critical('Error %s' % dns.rcode.to_text(rcode))
+                    return None
 
 
             rrset = None

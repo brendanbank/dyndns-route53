@@ -20,6 +20,11 @@ services:
     networks:
       - web-network
     restart: always
+    logging:
+      driver: loki
+      options:
+        loki-url: "https://loki.banzai.nl:3100/loki/api/v1/push"
+
 
   web:
     image: ghcr.io/brendanbank/dyndns-route53:latest
@@ -43,7 +48,7 @@ services:
     logging:
       driver: loki
       options:
-        loki-url: "http://loki.bgwlan.nl:3100/loki/api/v1/push"
+        loki-url: "https://loki.banzai.nl:3100/loki/api/v1/push"
 
 networks:
   web-network:

@@ -165,3 +165,4 @@ suffix_data.cache
 letsencrypt/
 compose.override.yaml
 backups/
+tmp/

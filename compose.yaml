@@ -17,13 +17,34 @@ services:
     volumes:
       - ./letsencrypt:/letsencrypt
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - web-network
-    restart: always
     logging:
-      driver: loki
+      driver: "loki"
       options:
-        loki-url: "https://loki.banzai.nl:3100/loki/api/v1/push"
+        loki-external-labels: "platform=docker"
+        loki-url: "http://loki.bgwlan.nl:3100/loki/api/v1/push"
+        loki-pipeline-stages: |
+          - multiline:
+              firstline: '^Traceback \(most recent call last\):'
+              max_wait_time: 3s
+              max_lines: 128
+          - json:
+              expressions:
+                stream: stream
+                attrs: attrs
+                tag: attrs.tag
+                level: attrs.level
+                msg: log
+        loki-relabel-config: |
+          - action: replace
+            source_labels: ['__filename__']
+            target_label: 'job'
+          - action: replace
+            source_labels: ['container_name']
+            target_label: 'container'
+          - action: replace
+            source_labels: ['stream']
+            target_label: 'stream'
+
 
 
   web:
@@ -46,9 +67,33 @@ services:
       - web-network
     restart: always
     logging:
-      driver: loki
+      driver: "loki"
       options:
-        loki-url: "https://loki.banzai.nl:3100/loki/api/v1/push"
+        loki-external-labels: "platform=docker"
+        loki-url: "http://loki.bgwlan.nl:3100/loki/api/v1/push"
+        loki-pipeline-stages: |
+          - multiline:
+              firstline: '^Traceback \(most recent call last\):'
+              max_wait_time: 3s
+              max_lines: 128
+          - json:
+              expressions:
+                stream: stream
+                attrs: attrs
+                tag: attrs.tag
+                level: attrs.level
+                msg: log
+        loki-relabel-config: |
+          - action: replace
+            source_labels: ['__filename__']
+            target_label: 'job'
+          - action: replace
+            source_labels: ['container_name']
+            target_label: 'container'
+          - action: replace
+            source_labels: ['stream']
+            target_label: 'stream'
+
 
 networks:
   web-network:

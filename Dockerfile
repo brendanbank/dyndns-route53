@@ -11,10 +11,14 @@ COPY dyndns.py config.py models.py auth.py forms.py web_routes.py getpwd.py ./
 COPY lib/ lib/
 COPY templates/ templates/
 COPY static/ static/
+COPY entrypoint.sh .
 
-RUN mkdir -p /app/instance
+RUN addgroup --system app && adduser --system --ingroup app app
+
+RUN mkdir -p /app/instance && chown app:app /app/instance
 VOLUME /app/instance
 
 EXPOSE 80
 
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["gunicorn", "--bind", "0.0.0.0:80", "--workers", "2", "--preload", "--access-logfile", "-", "--access-logformat", "%(h)s %(l)s %(u)s %(t)s \"%(m)s %(U)s %(H)s\" %(s)s %(b)s", "dyndns:create_app()"]

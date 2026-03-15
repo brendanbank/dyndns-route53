@@ -19,6 +19,8 @@ services:
     volumes:
       - ./letsencrypt:/letsencrypt
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - web-network
     logging:
       driver: "loki"
       options:
@@ -65,6 +67,22 @@ services:
       - "traefik.http.routers.dyndns.tls.certresolver=letsencrypt"
       - "traefik.http.services.dyndns.loadbalancer.server.port=80"
       - "traefik.docker.network=web-network"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:80/')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     networks:
       - web-network
     restart: always

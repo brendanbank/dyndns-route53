@@ -149,7 +149,7 @@ docker run --rm ghcr.io/brendanbank/dyndns-route53:latest python3 /app/getpwd.py
 ### Automated tests
 
 ```bash
-# Run the pytest suite (77 tests)
+# Run the pytest suite (111 tests)
 python -m pytest tests/ -v
 
 # Lint check

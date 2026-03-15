@@ -175,6 +175,8 @@ The `instance/` directory (SQLite databases) is persisted via a Docker named vol
 
 Traefik and the web container share a `web-network` bridge network. To preserve real client IPs, the Docker daemon must have `"userland-proxy": false` in `/etc/docker/daemon.json` (Docker's default userland-proxy rewrites source IPs to the bridge gateway). With this setting, iptables NAT preserves source IPs and Traefik correctly populates `X-Forwarded-For`. Port mapping uses `${HTTP_PORT:-80}:80` and `${HTTPS_PORT:-443}:443`.
 
+The container is hardened: runs as a non-root `app` user (uid 100) via an entrypoint script (`entrypoint.sh`) that fixes volume ownership with `chown` then drops privileges with `setpriv`. The root filesystem is read-only (`/tmp` mounted as tmpfs), all Linux capabilities are dropped except `CHOWN`/`SETUID`/`SETGID` (needed by the entrypoint only, dropped after privilege de-escalation), and `no-new-privileges` prevents setuid-based escalation. A health check polls `http://localhost:80/` every 30 seconds.
+
 Gunicorn access log uses a custom format with `%(U)s` (path only) instead of `%(r)s` (full request line) to prevent passwords in query parameters from appearing in logs.
 
 There are two compose files:
@@ -183,7 +185,7 @@ There are two compose files:
 
 ## Testing
 
-**Pytest (107 tests):**
+**Pytest (111 tests):**
 ```
 python -m pytest tests/ -v
 ```
@@ -245,3 +247,4 @@ Expected delete response: `good` (record deleted) or `nochg` (record didn't exis
 - Query parameter authentication is supported but logs a warning — prefer HTTP Basic Auth
 - Gunicorn access log excludes query strings to prevent password leakage
 - CSRF protection enabled for all web forms; `/nic/update` and `/nic/delete` are exempt (use Basic Auth)
+- Container runs as non-root user with read-only filesystem, dropped capabilities, and no-new-privileges

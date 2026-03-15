@@ -49,6 +49,55 @@ class TestAuthentication:
         }, follow_redirects=True)
         assert b'Invalid username or password' in resp.data
 
+    def test_web_login_disabled_user_rejected(self, client, app):
+        """User with web_login=False cannot log in to the web UI."""
+        from models import db, User
+        from tests.conftest import _hash_password
+        with app.app_context():
+            user = User(
+                username='apionly',
+                password_hash=_hash_password(TEST_PASSWORD),
+                role='user',
+                is_active=True,
+                web_login=False,
+            )
+            db.session.add(user)
+            db.session.commit()
+        resp = client.post('/admin/login', data={
+            'username': 'apionly', 'password': TEST_PASSWORD,
+        }, follow_redirects=True)
+        assert b'Web login is not enabled for this account.' in resp.data
+        # Should NOT redirect to TOTP setup/verify
+        assert b'totp' not in resp.data.lower() or b'Log In' in resp.data
+
+    def test_web_login_disabled_user_can_use_api(self, client, app):
+        """User with web_login=False can still use /nic/update via HTTP Basic Auth."""
+        import base64
+        from models import db, User, Domain, Hostname
+        from tests.conftest import _hash_password
+        with app.app_context():
+            user = User(
+                username='apionly',
+                password_hash=_hash_password(TEST_PASSWORD),
+                role='user',
+                is_active=True,
+                web_login=False,
+            )
+            db.session.add(user)
+            db.session.commit()
+            domain = Domain(name='api.example.com')
+            db.session.add(domain)
+            db.session.commit()
+            hn = Hostname(name='test.api.example.com', domain_id=domain.id, user_id=user.id)
+            db.session.add(hn)
+            db.session.commit()
+        creds = base64.b64encode(b'apionly:' + TEST_PASSWORD.encode()).decode()
+        headers = {'Authorization': f'Basic {creds}'}
+        resp = client.get('/nic/update?hostname=test.api.example.com&myip=1.2.3.4', headers=headers)
+        # Should authenticate successfully — 911 because no backend configured, not badauth
+        assert b'badauth' not in resp.data
+        assert b'911' in resp.data
+
     def test_full_totp_setup_flow(self, client, admin_user):
         resp = login_user_full(client, 'admin', ADMIN_PASSWORD)
         assert resp.status_code == 200
@@ -154,7 +203,7 @@ class TestUserManagement:
     def _login_admin(self, client, admin_user, admin_with_totp):
         login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
 
-    def test_create_user(self, client, admin_user, admin_with_totp):
+    def test_create_user(self, client, admin_user, admin_with_totp, app):
         self._login_admin(client, admin_user, admin_with_totp)
         resp = client.post('/admin/users/new', data={
             'username': 'newuser',
@@ -164,6 +213,28 @@ class TestUserManagement:
         }, follow_redirects=True)
         assert resp.status_code == 200
         assert b'created' in resp.data.lower() or b'newuser' in resp.data
+        # Default web_login should be False
+        from models import User
+        with app.app_context():
+            u = User.query.filter_by(username='newuser').first()
+            assert u is not None
+            assert u.web_login is False
+
+    def test_create_user_with_web_login(self, client, admin_user, admin_with_totp, app):
+        self._login_admin(client, admin_user, admin_with_totp)
+        resp = client.post('/admin/users/new', data={
+            'username': 'webuser',
+            'password': 'newpass12345',
+            'role': 'user',
+            'is_active': 'y',
+            'web_login': 'y',
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        from models import User
+        with app.app_context():
+            u = User.query.filter_by(username='webuser').first()
+            assert u is not None
+            assert u.web_login is True
 
     def test_edit_user(self, client, admin_user, admin_with_totp, regular_user, app):
         self._login_admin(client, admin_user, admin_with_totp)
@@ -172,6 +243,7 @@ class TestUserManagement:
             'password': '',
             'role': 'user',
             'is_active': 'y',
+            'web_login': 'y',
         }, follow_redirects=True)
         assert resp.status_code == 200
         assert b'updated' in resp.data.lower() or b'testuser_renamed' in resp.data

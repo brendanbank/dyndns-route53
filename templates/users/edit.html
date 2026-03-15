@@ -31,6 +31,10 @@
                 {{ form.is_active(class="form-check-input") }}
                 {{ form.is_active.label(class="form-check-label") }}
             </div>
+            <div class="mb-3 form-check">
+                {{ form.web_login(class="form-check-input") }}
+                {{ form.web_login.label(class="form-check-label") }}
+            </div>
             <div class="d-flex gap-2">
                 {{ form.submit(class="btn btn-primary") }}
                 <a href="{{ url_for('web.user_list') }}" class="btn btn-outline-secondary">Cancel</a>

@@ -15,6 +15,7 @@ class UserForm(FlaskForm):
     password = PasswordField('Password', validators=[Optional(), Length(min=8)])
     role = SelectField('Role', choices=[('user', 'User'), ('admin', 'Admin')])
     is_active = BooleanField('Active', default=True)
+    web_login = BooleanField('Web Login', default=False)
     submit = SubmitField('Save')
 
     def __init__(self, original_username=None, *args, **kwargs):

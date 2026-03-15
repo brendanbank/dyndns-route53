@@ -12,6 +12,7 @@
                 <th>Username</th>
                 <th>Role</th>
                 <th>Active</th>
+                <th>Web Login</th>
                 <th>2FA</th>
                 <th>Hostnames</th>
                 <th>Created</th>
@@ -24,6 +25,7 @@
                 <td><a href="{{ url_for('web.user_edit', user_id=user.id) }}">{{ user.username }}</a></td>
                 <td><span class="badge bg-{{ 'warning' if user.is_admin else 'secondary' }}">{{ user.role }}</span></td>
                 <td>{{ 'Yes' if user.is_active else 'No' }}</td>
+                <td>{{ 'Yes' if user.web_login else 'No' }}</td>
                 <td><span class="badge bg-{{ 'success' if user.has_totp else 'secondary' }}">{{ 'Yes' if user.has_totp else 'No' }}</span></td>
                 <td>{{ user.hostnames|length }}</td>
                 <td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '' }}</td>

@@ -84,9 +84,23 @@
             {% for event in recent_events %}
             <tr>
                 <td>{{ event.created_at.strftime('%Y-%m-%d %H:%M:%S') if event.created_at else '' }}</td>
-                {% if current_user.is_admin %}<td>{{ event.username }}</td>{% endif %}
+                {% if current_user.is_admin %}
+                <td>
+                    {% if event.user_id in user_map %}
+                    <a href="{{ url_for('web.user_edit', user_id=event.user_id) }}">{{ event.username }}</a>
+                    {% else %}
+                    {{ event.username }}
+                    {% endif %}
+                </td>
+                {% endif %}
                 <td>{{ event.event_type }}</td>
-                <td>{{ event.hostname or '' }}</td>
+                <td>
+                    {% if event.hostname and event.hostname in hostname_map %}
+                    <a href="{{ url_for('web.user_hostnames', user_id=hostname_map[event.hostname].user_id) }}">{{ event.hostname }}</a>
+                    {% else %}
+                    {{ event.hostname or '' }}
+                    {% endif %}
+                </td>
                 <td>{{ event.ip_address or '' }}</td>
                 <td>{{ event.backend_type or '' }}</td>
                 <td>

@@ -51,6 +51,9 @@ def login():
     if form.validate_on_submit():
         user = authenticate_dyndns_user(form.username.data, form.password.data)
         if user:
+            if not user.web_login:
+                flash('Web login is not enabled for this account.', 'danger')
+                return render_template('login.html', form=form)
             session['pending_2fa_user_id'] = user.id
             session['next_url'] = request.args.get('next')
             if user.has_totp:
@@ -153,13 +156,23 @@ def dashboard():
         hostname_count = Hostname.query.count()
         event_count = Event.query.count()
         recent_events = Event.query.order_by(Event.created_at.desc()).limit(10).all()
-        return render_template('dashboard.html', user_count=user_count, domain_count=domain_count,
-                               hostname_count=hostname_count, event_count=event_count,
-                               recent_events=recent_events)
     else:
         user_hostnames = Hostname.query.filter_by(user_id=current_user.id).all()
         recent_events = Event.query.filter_by(user_id=current_user.id).order_by(Event.created_at.desc()).limit(10).all()
-        return render_template('dashboard.html', user_hostnames=user_hostnames, recent_events=recent_events)
+
+    # Build lookup dicts for linking users and hostnames in recent events
+    user_ids = {e.user_id for e in recent_events}
+    user_map = {u.id: u for u in User.query.filter(User.id.in_(user_ids)).all()} if user_ids else {}
+    hostname_names = {e.hostname for e in recent_events if e.hostname}
+    hostname_map = {h.name: h for h in Hostname.query.filter(Hostname.name.in_(hostname_names)).all()} if hostname_names else {}
+
+    if current_user.is_admin:
+        return render_template('dashboard.html', user_count=user_count, domain_count=domain_count,
+                               hostname_count=hostname_count, event_count=event_count,
+                               recent_events=recent_events, user_map=user_map, hostname_map=hostname_map)
+    else:
+        return render_template('dashboard.html', user_hostnames=user_hostnames, recent_events=recent_events,
+                               user_map=user_map, hostname_map=hostname_map)
 
 
 # --- User Management (Admin) ---
@@ -180,7 +193,8 @@ def user_create():
     if form.validate_on_submit():
         hashed = bcrypt.hashpw(form.password.data.encode('utf8'), bcrypt.gensalt()).decode()
         user = User(username=form.username.data, password_hash=hashed,
-                    role=form.role.data, is_active=form.is_active.data)
+                    role=form.role.data, is_active=form.is_active.data,
+                    web_login=form.web_login.data)
         db.session.add(user)
         db.session.commit()
         flash(f'User "{user.username}" created.', 'success')
@@ -200,6 +214,7 @@ def user_edit(user_id):
             user.password_hash = bcrypt.hashpw(form.password.data.encode('utf8'), bcrypt.gensalt()).decode()
         user.role = form.role.data
         user.is_active = form.is_active.data
+        user.web_login = form.web_login.data
         db.session.commit()
         flash(f'User "{user.username}" updated.', 'success')
         return redirect(url_for('web.user_edit', user_id=user.id))
@@ -494,13 +509,29 @@ def event_list():
         query = query.filter_by(user_id=current_user.id)
 
     if username_filter and current_user.is_admin:
-        query = query.filter(Event.username.ilike(f'%{username_filter}%'))
+        query = query.filter(Event.username == username_filter)
     if hostname_filter:
-        query = query.filter(Event.hostname.ilike(f'%{hostname_filter}%'))
+        query = query.filter(Event.hostname == hostname_filter)
 
     events = query.order_by(Event.created_at.desc()).paginate(page=page, per_page=ITEMS_PER_PAGE, error_out=False)
+
+    # Build lookup dicts for linking users and hostnames
+    user_ids = {e.user_id for e in events.items}
+    user_map = {u.id: u for u in User.query.filter(User.id.in_(user_ids)).all()} if user_ids else {}
+
+    hostname_names = {e.hostname for e in events.items if e.hostname}
+    hostname_map = {h.name: h for h in Hostname.query.filter(Hostname.name.in_(hostname_names)).all()} if hostname_names else {}
+
+    # Dropdown choices
+    all_users = User.query.order_by(User.username).all() if current_user.is_admin else []
+    if current_user.is_admin:
+        all_hostnames = Hostname.query.order_by(Hostname.name).all()
+    else:
+        all_hostnames = Hostname.query.filter_by(user_id=current_user.id).order_by(Hostname.name).all()
+
     return render_template('events/list.html', events=events, username_filter=username_filter,
-                           hostname_filter=hostname_filter)
+                           hostname_filter=hostname_filter, user_map=user_map, hostname_map=hostname_map,
+                           all_users=all_users, all_hostnames=all_hostnames)
 
 
 @web_bp.route('/admin/events/clear', methods=['POST'])

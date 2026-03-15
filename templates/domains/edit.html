@@ -69,8 +69,8 @@
 <ul class="list-group mb-3">
     {% for hn in domain.hostnames %}
     <li class="list-group-item d-flex justify-content-between">
-        {{ hn.name }}
-        <span class="text-muted">{{ hn.user.username }}</span>
+        <a href="{{ url_for('web.user_hostnames', user_id=hn.user_id) }}">{{ hn.name }}</a>
+        <a href="{{ url_for('web.user_edit', user_id=hn.user_id) }}" class="text-muted">{{ hn.user.username }}</a>
     </li>
     {% endfor %}
 </ul>

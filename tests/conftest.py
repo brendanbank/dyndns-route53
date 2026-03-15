@@ -70,6 +70,7 @@ def admin_user(app):
             password_hash=_hash_password(ADMIN_PASSWORD),
             role='admin',
             is_active=True,
+            web_login=True,
         )
         db.session.add(user)
         db.session.commit()
@@ -86,6 +87,7 @@ def regular_user(app):
             password_hash=_hash_password(TEST_PASSWORD),
             role='user',
             is_active=True,
+            web_login=True,
         )
         db.session.add(user)
         db.session.commit()

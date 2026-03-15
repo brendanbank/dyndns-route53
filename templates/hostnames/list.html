@@ -19,7 +19,7 @@
             {% for hn in hostnames %}
             <tr>
                 <td>{{ hn.name }}</td>
-                <td>{{ hn.domain.name }}</td>
+                <td><a href="{{ url_for('web.domain_edit', domain_id=hn.domain.id) }}">{{ hn.domain.name }}</a></td>
                 <td>
                     {% if hn.backends %}
                         {% for b in hn.backends %}

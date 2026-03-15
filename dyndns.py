@@ -74,6 +74,16 @@ def create_app(config_class=None):
         except Exception:
             db.session.rollback()
 
+        # One-time migration: add web_login column to users table
+        try:
+            db.session.execute(db.text('ALTER TABLE users ADD COLUMN web_login BOOLEAN NOT NULL DEFAULT 0'))
+            db.session.commit()
+            # Enable web login for existing admin users
+            db.session.execute(db.text("UPDATE users SET web_login = 1 WHERE role = 'admin'"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
         # One-time migration: populate hostname_backends for existing hostnames
         # This ensures all existing hostnames have all their domain backends enabled
         try:
@@ -110,6 +120,7 @@ def create_app(config_class=None):
                     password_hash=password_hash,
                     role='admin',
                     is_active=True,
+                    web_login=True,
                 )
                 admin_totp = os.environ.get('ADMIN_TOTP_SECRET')
                 if admin_totp:

@@ -58,7 +58,7 @@ class nsupdate(BaseAccount):
                 try:
                     log.debug(f'try update zonename = {zonename}, hostname = {hostname}, ttl = {ttl}, rtype = {rtype}, ttl = {ttl}, IP = {IP}')
 
-                    response = dns.query.tcp(update, creds['nsupdate_nameserver'])
+                    response = dns.query.tcp(update, creds['nsupdate_nameserver'], timeout=10)
                 except Exception as e:
                     log.critical(f'something went wrong! {e}')
                     results[hostname] = "dnserr"
@@ -93,7 +93,7 @@ class nsupdate(BaseAccount):
 
                 try:
                     log.debug(f'try delete zonename = {zonename}, hostname = {hostname}, rtypes = {rtypes}')
-                    response = dns.query.tcp(update, nameserver)
+                    response = dns.query.tcp(update, nameserver, timeout=10)
                     log.debug(f'response = {response}')
                     log.info(f'deleted dns records via nsupdate on {nameserver}: {hostname} {rtypes} for update type {self._services}')
                     results[hostname] = "good"

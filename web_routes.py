@@ -36,6 +36,11 @@ BACKEND_CONFIG_KEYS = {
 }
 
 
+@web_bp.route('/health')
+def health():
+    return 'OK', 200
+
+
 @web_bp.route('/')
 def index():
     return redirect(url_for('web.dashboard'))

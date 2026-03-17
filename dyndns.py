@@ -129,6 +129,20 @@ def create_app(config_class=None):
                 db.session.commit()
                 log.info('Admin user created from ADMIN_PASSWORD env var.')
 
+    # Scrub password from WSGI environ so gunicorn error logs cannot leak it
+    @app.before_request
+    def _scrub_password_from_environ():
+        qs = request.environ.get('QUERY_STRING', '')
+        if 'password=' in qs:
+            # Force request.args to cache before scrubbing, so view functions
+            # still see the real password value
+            _ = request.args  # noqa: F841
+            scrubbed = re.sub(r'password=[^&]*', 'password=REDACTED', qs)
+            request.environ['QUERY_STRING'] = scrubbed
+            raw_uri = request.environ.get('RAW_URI', '')
+            if raw_uri:
+                request.environ['RAW_URI'] = re.sub(r'password=[^&]*', 'password=REDACTED', raw_uri)
+
     # Proxy fix for Traefik
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 

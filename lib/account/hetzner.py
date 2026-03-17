@@ -51,7 +51,7 @@ class Hetzner(BaseAccount):
             return self._zones.keys()
 
         try:
-            response = requests.get(f'{API_BASE}/zones', headers=self._headers())
+            response = requests.get(f'{API_BASE}/zones', headers=self._headers(), timeout=10)
             response.raise_for_status()
         except Exception as e:
             log.error(f'Failed to list hosted zones: {e}')
@@ -108,6 +108,7 @@ class Hetzner(BaseAccount):
                     resp = requests.get(
                         f'{API_BASE}/zones/{zone_id}/rrsets/{relative_name}/{rtype}',
                         headers=self._headers(),
+                        timeout=10,
                     )
 
                     if resp.status_code == 200:
@@ -116,6 +117,7 @@ class Hetzner(BaseAccount):
                             f'{API_BASE}/zones/{zone_id}/rrsets/{relative_name}/{rtype}/actions/set_records',
                             headers=self._headers(),
                             json={'records': [{'value': IP}]},
+                            timeout=10,
                         )
                         resp.raise_for_status()
                     else:
@@ -129,6 +131,7 @@ class Hetzner(BaseAccount):
                                 'ttl': ttl,
                                 'records': [{'value': IP}],
                             },
+                            timeout=10,
                         )
                         resp.raise_for_status()
 
@@ -163,6 +166,7 @@ class Hetzner(BaseAccount):
                         resp = requests.delete(
                             f'{API_BASE}/zones/{zone_id}/rrsets/{relative_name}/{rt}',
                             headers=self._headers(),
+                            timeout=10,
                         )
                         if resp.status_code == 404:
                             continue

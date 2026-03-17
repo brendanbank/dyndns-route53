@@ -2,8 +2,11 @@
 
 from ..accounts import BaseAccount
 import boto3
+from botocore.config import Config
 from os import environ
 from . import log
+
+_BOTO_CONFIG = Config(connect_timeout=5, read_timeout=10, retries={'max_attempts': 1})
 
 
 class AWS(BaseAccount):
@@ -35,7 +38,7 @@ class AWS(BaseAccount):
             return self._zones.keys()
 
         try:
-            client = boto3.client('route53', **creds)
+            client = boto3.client('route53', config=_BOTO_CONFIG, **creds)
             response = client.list_hosted_zones()
         except Exception as e:
             log.error(f'Failed to list hosted zones: {e}')
@@ -58,7 +61,7 @@ class AWS(BaseAccount):
             log.error('AWS credentials not configured — cannot create records')
             return {h: 'dnserr' for hosts in hostname_zones.values() for h in hosts}
 
-        client = boto3.client('route53', **creds)
+        client = boto3.client('route53', config=_BOTO_CONFIG, **creds)
 
         log.debug(f'_zones.keys = {self._zones}')
 
@@ -119,7 +122,7 @@ class AWS(BaseAccount):
             log.error('AWS credentials not configured — cannot delete records')
             return {h: 'dnserr' for hosts in hostname_zones.values() for h in hosts}
 
-        client = boto3.client('route53', **creds)
+        client = boto3.client('route53', config=_BOTO_CONFIG, **creds)
         results = {}
         rtypes = [rtype] if rtype else ['A', 'AAAA']
 

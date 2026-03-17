@@ -153,6 +153,7 @@ class BaseAccount:
         log.debug(f'try to resolve hostname={hostname}, IP={IP}, rrtype={rrtype}, nameserver={nameserver}')
 
         resolver = dns.resolver.Resolver(configure=False)
+        resolver.lifetime = 10
 
         if nameserver is None:
             nameserver=self.get_authoritative_nameserver(hostname)
@@ -219,7 +220,7 @@ class BaseAccount:
 
             log.debug('Looking up %s on %s' % (sub, nameserver))
             query = dns.message.make_query(sub, dns.rdatatype.NS)
-            response = dns.query.udp(query, nameserver)
+            response = dns.query.udp(query, nameserver, timeout=5)
 
             rcode = response.rcode()
             if rcode != dns.rcode.NOERROR:

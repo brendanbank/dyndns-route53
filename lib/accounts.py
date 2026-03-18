@@ -220,7 +220,11 @@ class BaseAccount:
 
             log.debug('Looking up %s on %s' % (sub, nameserver))
             query = dns.message.make_query(sub, dns.rdatatype.NS)
-            response = dns.query.udp(query, nameserver, timeout=5)
+            try:
+                response = dns.query.udp(query, nameserver, timeout=5)
+            except (dns.exception.Timeout, OSError) as e:
+                log.error('DNS query for %s timed out on %s: %s' % (sub, nameserver, e))
+                return None
 
             rcode = response.rcode()
             if rcode != dns.rcode.NOERROR:
@@ -249,7 +253,11 @@ class BaseAccount:
             else:
                 authority = rr.target
                 log.debug('%s is authoritative for %s' % (authority, sub))
-                nameserver = default.resolve(authority).rrset[0].to_text()
+                try:
+                    nameserver = default.resolve(authority).rrset[0].to_text()
+                except (dns.exception.Timeout, dns.resolver.NoNameservers, OSError) as e:
+                    log.error('Failed to resolve authority %s: %s' % (authority, e))
+                    return None
 
             depth += 1
 

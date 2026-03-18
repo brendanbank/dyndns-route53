@@ -61,7 +61,11 @@ class AWS(BaseAccount):
             log.error('AWS credentials not configured — cannot create records')
             return {h: 'dnserr' for hosts in hostname_zones.values() for h in hosts}
 
-        client = boto3.client('route53', config=_BOTO_CONFIG, **creds)
+        try:
+            client = boto3.client('route53', config=_BOTO_CONFIG, **creds)
+        except Exception as e:
+            log.error(f'Failed to create Route53 client: {e}')
+            return {h: 'dnserr' for hosts in hostname_zones.values() for h in hosts}
 
         log.debug(f'_zones.keys = {self._zones}')
 
@@ -122,7 +126,12 @@ class AWS(BaseAccount):
             log.error('AWS credentials not configured — cannot delete records')
             return {h: 'dnserr' for hosts in hostname_zones.values() for h in hosts}
 
-        client = boto3.client('route53', config=_BOTO_CONFIG, **creds)
+        try:
+            client = boto3.client('route53', config=_BOTO_CONFIG, **creds)
+        except Exception as e:
+            log.error(f'Failed to create Route53 client: {e}')
+            return {h: 'dnserr' for hosts in hostname_zones.values() for h in hosts}
+
         results = {}
         rtypes = [rtype] if rtype else ['A', 'AAAA']
 

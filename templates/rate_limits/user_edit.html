@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Rate Limit for {{ user.username }} - DynDNS Admin{% endblock %}
+{% block content %}
+<h2>Rate Limit Override: {{ user.username }}</h2>
+
+<div class="row">
+    <div class="col-md-6">
+        <form method="POST">
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                {{ form.requests_per_minute.label(class="form-label") }}
+                {{ form.requests_per_minute(class="form-control", style="max-width: 200px") }}
+                {% for error in form.requests_per_minute.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+            </div>
+            <div class="mb-3">
+                {{ form.requests_per_hour.label(class="form-label") }}
+                {{ form.requests_per_hour(class="form-control", style="max-width: 200px") }}
+                {% for error in form.requests_per_hour.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+            </div>
+            <div class="d-flex gap-2">
+                {{ form.submit(class="btn btn-primary") }}
+                <a href="{{ url_for('web.rate_limit_global') }}" class="btn btn-outline-secondary">Back</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Rate Limits - DynDNS Admin{% endblock %}
+{% block content %}
+<h2>Rate Limits</h2>
+
+<h4 class="mt-4">Global Defaults</h4>
+<div class="row">
+    <div class="col-md-6">
+        <form method="POST">
+            {{ form.hidden_tag() }}
+            <div class="mb-3">
+                {{ form.requests_per_minute.label(class="form-label") }}
+                {{ form.requests_per_minute(class="form-control", style="max-width: 200px") }}
+                {% for error in form.requests_per_minute.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+            </div>
+            <div class="mb-3">
+                {{ form.requests_per_hour.label(class="form-label") }}
+                {{ form.requests_per_hour(class="form-control", style="max-width: 200px") }}
+                {% for error in form.requests_per_hour.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+            </div>
+            {{ form.submit(class="btn btn-primary") }}
+        </form>
+    </div>
+</div>
+
+<h4 class="mt-4">Per-User Overrides</h4>
+{% if user_overrides %}
+<div class="table-responsive">
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>User</th>
+                <th>Per Minute</th>
+                <th>Per Hour</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for override in user_overrides %}
+            <tr>
+                <td>{{ override.user.username if override.user else 'Unknown' }}</td>
+                <td>{{ override.requests_per_minute }}</td>
+                <td>{{ override.requests_per_hour }}</td>
+                <td>
+                    <a href="{{ url_for('web.rate_limit_user', user_id=override.user_id) }}"
+                       class="btn btn-sm btn-outline-primary">Edit</a>
+                    <form method="POST" action="{{ url_for('web.rate_limit_user_delete', user_id=override.user_id) }}"
+                          style="display:inline" onsubmit="return confirm('Remove this rate limit override?')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p class="text-muted">No per-user overrides. All users use the global defaults.</p>
+{% endif %}
+
+<h5>Add Override</h5>
+<div class="row">
+    <div class="col-md-4">
+        {% for user in users %}
+        {% if not user.rate_limit %}
+        <a href="{{ url_for('web.rate_limit_user', user_id=user.id) }}"
+           class="btn btn-sm btn-outline-secondary mb-1">{{ user.username }}</a>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<div class="mt-3">
+    <small class="text-muted">
+        Rate limits are enforced per gunicorn worker. With multiple workers, the effective limit
+        is slightly higher than configured. This is acceptable for DynDNS update frequency.
+    </small>
+</div>
+{% endblock %}

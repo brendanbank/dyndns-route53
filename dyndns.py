@@ -37,10 +37,11 @@ from datetime import datetime, timedelta, timezone
 import bcrypt as _bcrypt
 
 from config import Config
-from models import db, User, Hostname, Event
+from models import db, User, Hostname, Event, RateLimitConfig, HealthCheckConfig
 from auth import login_manager, authenticate_dyndns_user
 from lib import log, AccountFactory
 from lib.accounts import BaseAccount
+from rate_limiter import rate_limiter, check_rate_limit
 
 
 def create_app(config_class=None):
@@ -83,6 +84,21 @@ def create_app(config_class=None):
             db.session.commit()
         except Exception:
             db.session.rollback()
+
+        # One-time migration: add ttl column to hostnames table
+        try:
+            db.session.execute(db.text('ALTER TABLE hostnames ADD COLUMN ttl INTEGER NOT NULL DEFAULT 60'))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+        # One-time migration: add last_ip tracking columns to hostnames table
+        for col in ['last_ip_v4 VARCHAR(45)', 'last_ip_v6 VARCHAR(45)', 'last_updated_at DATETIME']:
+            try:
+                db.session.execute(db.text(f'ALTER TABLE hostnames ADD COLUMN {col}'))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
 
         # One-time migration: populate hostname_backends for existing hostnames
         # This ensures all existing hostnames have all their domain backends enabled
@@ -128,6 +144,23 @@ def create_app(config_class=None):
                 db.session.add(admin)
                 db.session.commit()
                 log.info('Admin user created from ADMIN_PASSWORD env var.')
+
+        # Create global rate limit config if none exists
+        if not RateLimitConfig.query.filter_by(is_global=True).first():
+            global_rl = RateLimitConfig(is_global=True, requests_per_minute=30, requests_per_hour=500)
+            db.session.add(global_rl)
+            db.session.commit()
+
+        # Create health check config if none exists
+        if not HealthCheckConfig.query.first():
+            hc_config = HealthCheckConfig(check_interval_minutes=15, enabled=False)
+            db.session.add(hc_config)
+            db.session.commit()
+
+        # Initialize health checker (not in testing)
+        if not app.config.get('TESTING'):
+            from health_checker import init_health_checker
+            init_health_checker(app)
 
     # Scrub password from WSGI environ so gunicorn error logs cannot leak it
     @app.before_request
@@ -200,6 +233,21 @@ def find_hostname(user, hostname_str):
     return Hostname.query.filter_by(name=hostname_str.lower(), user_id=user.id).first()
 
 
+@nic_update_bp.route("/nic/checkip")
+def checkip():
+    """Return the caller's public IP address, like checkip.dyndns.com."""
+    ip = request.remote_addr
+    fmt = request.args.get("format", "html")
+    if fmt == "plain":
+        return httpReply(ip)
+    response = make_response(
+        f"<html><head><title>Current IP Check</title></head>"
+        f"<body>Current IP Address: {ip}</body></html>"
+    )
+    response.mimetype = "text/html"
+    return response
+
+
 @nic_update_bp.route("/nic/update")
 def updateDydns():
     myip = request.args.get("myip")
@@ -228,6 +276,13 @@ def updateDydns():
     if not user:
         log.critical('invalid username or password')
         return httpReply("badauth")
+
+    # Rate limiting
+    if check_rate_limit(user):
+        log.warning(f'rate limit exceeded for user {username}')
+        log_event(user, 'dns_update', response='abuse', detail='rate limit exceeded')
+        return httpReply("abuse")
+    rate_limiter.record_request(user.id)
 
     updatetype = request.args.get("updatetype")
     if updatetype:
@@ -308,7 +363,7 @@ def updateDydns():
                 results.append('nohost')
                 continue
 
-            update_results = account.createrecords(str(validated_ip), hostname_zones, rtype=ipType)
+            update_results = account.createrecords(str(validated_ip), hostname_zones, rtype=ipType, ttl=hn.ttl)
             status = update_results.get(hostname, "dnserr") if update_results else "dnserr"
             log_event(user, 'dns_update', hostname=hostname, ip_address=str(validated_ip),
                       backend_type=db_backend.backend_type, response=status)
@@ -316,6 +371,13 @@ def updateDydns():
 
         # Aggregate: good if any good, nochg if all nochg, else first error
         if 'good' in results:
+            # Track last known IP for health checks
+            if ipType == 'A':
+                hn.last_ip_v4 = str(validated_ip)
+            else:
+                hn.last_ip_v6 = str(validated_ip)
+            hn.last_updated_at = datetime.now(timezone.utc)
+            db.session.commit()
             lines.append(f"good {validated_ip}")
         elif all(r == 'nochg' for r in results):
             lines.append(f"nochg {validated_ip}")
@@ -352,6 +414,13 @@ def deleteDyndns():
     if not user:
         log.critical('invalid username or password')
         return httpReply("badauth")
+
+    # Rate limiting
+    if check_rate_limit(user):
+        log.warning(f'rate limit exceeded for user {username}')
+        log_event(user, 'dns_update', response='abuse', detail='rate limit exceeded')
+        return httpReply("abuse")
+    rate_limiter.record_request(user.id)
 
     log.info(f'received delete request from {ip} to host: {request.host}  url: {url}')
 

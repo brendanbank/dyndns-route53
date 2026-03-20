@@ -77,8 +77,7 @@
 
 <div class="mt-3">
     <small class="text-muted">
-        Rate limits are enforced per gunicorn worker. With multiple workers, the effective limit
-        is slightly higher than configured. This is acceptable for DynDNS update frequency.
+        Rate limits are stored in the database and shared across all gunicorn workers.
     </small>
 </div>
 {% endblock %}

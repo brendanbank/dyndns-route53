@@ -157,6 +157,27 @@ def create_app(config_class=None):
             db.session.add(hc_config)
             db.session.commit()
 
+        # Seed last_ip from DNS for hostnames that have no tracked IPs
+        import dns.resolver
+        untracked = Hostname.query.filter(
+            Hostname.last_ip_v4.is_(None),
+            Hostname.last_ip_v6.is_(None),
+        ).all()
+        for hn in untracked:
+            for rtype, attr in [('A', 'last_ip_v4'), ('AAAA', 'last_ip_v6')]:
+                try:
+                    answers = dns.resolver.resolve(hn.name, rtype)
+                    setattr(hn, attr, answers[0].address)
+                except Exception:
+                    pass
+            if hn.last_ip_v4 or hn.last_ip_v6:
+                hn.last_updated_at = datetime.now(timezone.utc)
+        if untracked:
+            db.session.commit()
+            seeded = sum(1 for h in untracked if h.last_ip_v4 or h.last_ip_v6)
+            if seeded:
+                log.info(f'Seeded last_ip from DNS for {seeded} hostname(s).')
+
         # Initialize health checker (not in testing)
         if not app.config.get('TESTING'):
             from health_checker import init_health_checker

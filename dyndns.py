@@ -29,6 +29,7 @@
 
 
 from flask import Flask, request, make_response
+import html
 from werkzeug.middleware.proxy_fix import ProxyFix
 import re
 import os
@@ -261,9 +262,10 @@ def checkip():
     fmt = request.args.get("format", "html")
     if fmt == "plain":
         return httpReply(ip)
+    safe_ip = html.escape(ip or "")
     response = make_response(
         f"<html><head><title>Current IP Check</title></head>"
-        f"<body>Current IP Address: {ip}</body></html>"
+        f"<body>Current IP Address: {safe_ip}</body></html>"
     )
     response.mimetype = "text/html"
     return response

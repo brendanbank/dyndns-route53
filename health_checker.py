@@ -50,6 +50,13 @@ def run_health_checks(app):
                     status = 'error'
                     detail = str(e)
 
+                if status == 'mismatch':
+                    log.warning(f'Health check MISMATCH: {hn.name} {rtype} expected {expected_ip}, got {actual_ip}')
+                elif status == 'missing':
+                    log.warning(f'Health check MISSING: {hn.name} {rtype} expected {expected_ip}, {detail}')
+                elif status == 'error':
+                    log.error(f'Health check ERROR: {hn.name} {rtype} {detail}')
+
                 hc = HealthCheck(
                     hostname=hn.name,
                     expected_ip=expected_ip,

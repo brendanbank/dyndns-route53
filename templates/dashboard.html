@@ -41,6 +41,41 @@
         </div>
     </div>
 </div>
+{% if health_issues is defined and health_issues %}
+<div class="row mt-4">
+    <div class="col-md-12">
+        <div class="card border-warning">
+            <div class="card-header text-warning">DNS Health Issues</div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0">
+                        <thead>
+                            <tr><th>Hostname</th><th>Type</th><th>Expected</th><th>Actual</th><th>Status</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for hc in health_issues %}
+                            <tr>
+                                <td>{{ hc.hostname }}</td>
+                                <td>{{ hc.record_type }}</td>
+                                <td>{{ hc.expected_ip or '' }}</td>
+                                <td>{{ hc.actual_ip or '' }}</td>
+                                <td>
+                                    {% if hc.status == 'mismatch' %}<span class="badge bg-warning text-dark">mismatch</span>
+                                    {% elif hc.status == 'missing' %}<span class="badge bg-danger">missing</span>
+                                    {% else %}<span class="badge bg-danger">error</span>{% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <a href="{{ url_for('web.health_check_list') }}" class="btn btn-outline-warning btn-sm mt-2">View All</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 {% else %}
 <div class="row mt-4">
     <div class="col-md-6">

@@ -116,7 +116,7 @@ class Hetzner(BaseAccount):
                         resp = requests.post(
                             f'{API_BASE}/zones/{zone_id}/rrsets/{relative_name}/{rtype}/actions/set_records',
                             headers=self._headers(),
-                            json={'records': [{'value': IP}]},
+                            json={'ttl': ttl, 'records': [{'value': IP}]},
                             timeout=10,
                         )
                         resp.raise_for_status()

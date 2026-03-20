@@ -1,6 +1,7 @@
 import base64
 import bcrypt
 import pytest
+from unittest.mock import patch, MagicMock
 from tests.conftest import (
     TEST_PASSWORD, ADMIN_PASSWORD, login_user_full, _hash_password,
 )
@@ -841,3 +842,421 @@ class TestBootAdminCreation:
         with app2.app_context():
             admins = User.query.filter_by(role='admin').all()
             assert len(admins) == 1
+
+
+# ==============================================================================
+# CheckIP Endpoint
+# ==============================================================================
+
+class TestCheckIP:
+
+    def test_checkip_returns_html(self, client):
+        resp = client.get('/nic/checkip')
+        assert resp.status_code == 200
+        assert resp.mimetype == 'text/html'
+        assert b'Current IP Address:' in resp.data
+
+    def test_checkip_plain_format(self, client):
+        resp = client.get('/nic/checkip?format=plain')
+        assert resp.status_code == 200
+        assert resp.mimetype == 'text/plain'
+        # Should be just the IP, no HTML
+        assert b'<html>' not in resp.data
+
+    def test_checkip_no_auth_required(self, client):
+        """checkip endpoint works without credentials."""
+        resp = client.get('/nic/checkip')
+        assert resp.status_code == 200
+
+
+# ==============================================================================
+# TTL Management
+# ==============================================================================
+
+class TestTTLManagement:
+
+    def test_hostname_default_ttl(self, app, regular_user, test_domain):
+        from models import db, Hostname
+        with app.app_context():
+            hn = Hostname(name='ttltest.example.com', domain_id=test_domain, user_id=regular_user)
+            db.session.add(hn)
+            db.session.commit()
+            assert hn.ttl == 60
+
+    def test_hostname_custom_ttl(self, app, regular_user, test_domain):
+        from models import db, Hostname
+        with app.app_context():
+            hn = Hostname(name='ttltest2.example.com', domain_id=test_domain, user_id=regular_user, ttl=300)
+            db.session.add(hn)
+            db.session.commit()
+            assert hn.ttl == 300
+
+    def test_admin_create_hostname_with_ttl(self, client, admin_user, admin_with_totp, regular_user, test_domain, app):
+        login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
+        resp = client.post(f'/admin/users/{regular_user}/hostnames', data={
+            'prefix': 'ttlhost',
+            'domain_id': test_domain,
+            'ttl': 120,
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        from models import Hostname
+        with app.app_context():
+            hn = Hostname.query.filter_by(name='ttlhost.example.com').first()
+            assert hn is not None
+            assert hn.ttl == 120
+
+    def test_user_create_hostname_with_ttl(self, client, regular_user, regular_user_with_totp, test_domain, app):
+        login_user_full(client, 'testuser', TEST_PASSWORD, totp_secret=regular_user_with_totp)
+        resp = client.post('/admin/hostnames', data={
+            'prefix': 'myttlhost',
+            'domain_id': test_domain,
+            'ttl': 300,
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        from models import Hostname
+        with app.app_context():
+            hn = Hostname.query.filter_by(name='myttlhost.example.com').first()
+            assert hn is not None
+            assert hn.ttl == 300
+
+    def test_ttl_validation_too_low(self, client, admin_user, admin_with_totp, regular_user, test_domain):
+        login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
+        resp = client.post(f'/admin/users/{regular_user}/hostnames', data={
+            'prefix': 'lowttl',
+            'domain_id': test_domain,
+            'ttl': 5,
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        assert b'TTL must be between' in resp.data
+
+    def test_ttl_validation_too_high(self, client, admin_user, admin_with_totp, regular_user, test_domain):
+        login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
+        resp = client.post(f'/admin/users/{regular_user}/hostnames', data={
+            'prefix': 'highttl',
+            'domain_id': test_domain,
+            'ttl': 100000,
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        assert b'TTL must be between' in resp.data
+
+    def test_update_ttl_via_backends_page(self, client, admin_user, admin_with_totp, regular_user,
+                                           test_domain, test_hostname, app):
+        login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
+        resp = client.post(f'/admin/users/{regular_user}/hostnames/{test_hostname}/backends', data={
+            'ttl': 600,
+            'save_ttl': '1',
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        from models import Hostname
+        with app.app_context():
+            hn = Hostname.query.get(test_hostname)
+            assert hn.ttl == 600
+
+    def test_ttl_passed_to_backend(self, client, regular_user, test_domain, test_hostname, app):
+        """TTL from hostname is passed to createrecords()."""
+        from models import db, Hostname, DomainBackend, BackendConfig, encrypt_value
+        with app.app_context():
+            hn = Hostname.query.get(test_hostname)
+            hn.ttl = 300
+            # Set up a backend with credentials
+            backend = DomainBackend(domain_id=test_domain, backend_type='aws')
+            db.session.add(backend)
+            db.session.commit()
+            for key, val in [('aws_access_key_id', 'test'), ('aws_secret_access_key', 'test')]:
+                cfg = BackendConfig(domain_backend_id=backend.id, config_key=key,
+                                    config_value=encrypt_value(val))
+                db.session.add(cfg)
+            hn.backends = [backend]
+            db.session.commit()
+
+        with patch('dyndns.Accounts') as mock_accounts:
+            mock_account = MagicMock()
+            mock_account.hostnameperzone.return_value = {'example.com': ['test.example.com']}
+            mock_account.createrecords.return_value = {'test.example.com': 'good'}
+            mock_accounts.get.return_value = mock_account
+            auth = base64.b64encode(b'testuser:testpass123').decode()
+            client.get('/nic/update?hostname=test.example.com&myip=192.0.2.1',
+                        headers={'Authorization': f'Basic {auth}'})
+            if mock_account.createrecords.called:
+                _, kwargs = mock_account.createrecords.call_args
+                assert kwargs.get('ttl') == 300
+
+
+# ==============================================================================
+# Rate Limiting
+# ==============================================================================
+
+class TestRateLimiting:
+
+    def test_rate_limiter_allows_requests(self, app):
+        from rate_limiter import RateLimiter
+        rl = RateLimiter()
+        with app.app_context():
+            assert not rl.is_rate_limited(1, per_minute=10, per_hour=100)
+
+    def test_rate_limiter_blocks_after_limit(self, app):
+        from rate_limiter import RateLimiter
+        rl = RateLimiter()
+        with app.app_context():
+            for _ in range(5):
+                rl.record_request(1)
+            assert rl.is_rate_limited(1, per_minute=5, per_hour=100)
+
+    def test_rate_limiter_per_hour_limit(self, app):
+        from rate_limiter import RateLimiter
+        rl = RateLimiter()
+        with app.app_context():
+            for _ in range(10):
+                rl.record_request(1)
+            assert rl.is_rate_limited(1, per_minute=100, per_hour=10)
+
+    def test_rate_limiter_independent_users(self, app):
+        from rate_limiter import RateLimiter
+        rl = RateLimiter()
+        with app.app_context():
+            for _ in range(5):
+                rl.record_request(1)
+            # User 2 should not be affected
+            assert not rl.is_rate_limited(2, per_minute=5, per_hour=100)
+
+    def test_abuse_returned_on_rate_limit(self, client, regular_user, test_domain, test_hostname, app):
+        """Rate limited requests return 'abuse'."""
+        from models import db, RateLimitConfig
+        with app.app_context():
+            # Set a very low rate limit for testing
+            user_rl = RateLimitConfig(user_id=regular_user, is_global=False,
+                                       requests_per_minute=1, requests_per_hour=1)
+            db.session.add(user_rl)
+            db.session.commit()
+
+        auth = base64.b64encode(b'testuser:testpass123').decode()
+        headers = {'Authorization': f'Basic {auth}'}
+        # First request should go through (or be blocked by missing backend, not rate limit)
+        client.get('/nic/update?hostname=test.example.com&myip=192.0.2.1', headers=headers)
+        # Second request should be rate limited
+        resp = client.get('/nic/update?hostname=test.example.com&myip=192.0.2.1', headers=headers)
+        assert b'abuse' in resp.data
+
+    def test_admin_rate_limit_page(self, client, admin_user, admin_with_totp, app):
+        login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
+        resp = client.get('/admin/rate-limits')
+        assert resp.status_code == 200
+        assert b'Global Defaults' in resp.data
+
+    def test_admin_update_global_rate_limit(self, client, admin_user, admin_with_totp, app):
+        login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
+        resp = client.post('/admin/rate-limits', data={
+            'requests_per_minute': 50,
+            'requests_per_hour': 1000,
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        assert b'Global rate limits updated' in resp.data
+        from models import RateLimitConfig
+        with app.app_context():
+            config = RateLimitConfig.query.filter_by(is_global=True).first()
+            assert config.requests_per_minute == 50
+            assert config.requests_per_hour == 1000
+
+    def test_admin_create_user_rate_limit_override(self, client, admin_user, admin_with_totp, regular_user, app):
+        login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
+        resp = client.post(f'/admin/rate-limits/user/{regular_user}', data={
+            'requests_per_minute': 10,
+            'requests_per_hour': 100,
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        from models import RateLimitConfig
+        with app.app_context():
+            config = RateLimitConfig.query.filter_by(user_id=regular_user).first()
+            assert config is not None
+            assert config.requests_per_minute == 10
+
+    def test_admin_delete_user_rate_limit_override(self, client, admin_user, admin_with_totp, regular_user, app):
+        login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
+        # Create override first
+        client.post(f'/admin/rate-limits/user/{regular_user}', data={
+            'requests_per_minute': 10,
+            'requests_per_hour': 100,
+        }, follow_redirects=True)
+        # Delete it
+        resp = client.post(f'/admin/rate-limits/user/{regular_user}/delete', follow_redirects=True)
+        assert resp.status_code == 200
+        from models import RateLimitConfig
+        with app.app_context():
+            config = RateLimitConfig.query.filter_by(user_id=regular_user).first()
+            assert config is None
+
+
+# ==============================================================================
+# Health Checks
+# ==============================================================================
+
+class TestHealthChecks:
+
+    def test_global_rate_limit_created_on_boot(self, app):
+        from models import RateLimitConfig
+        with app.app_context():
+            config = RateLimitConfig.query.filter_by(is_global=True).first()
+            assert config is not None
+            assert config.requests_per_minute == 30
+
+    def test_health_check_config_created_on_boot(self, app):
+        from models import HealthCheckConfig
+        with app.app_context():
+            config = HealthCheckConfig.query.first()
+            assert config is not None
+            assert config.enabled is False
+
+    def test_last_ip_tracked_on_update(self, client, regular_user, test_domain, test_hostname, app):
+        """Successful update stores last_ip_v4 on the hostname."""
+        from models import db, Hostname, DomainBackend, BackendConfig, encrypt_value
+        with app.app_context():
+            backend = DomainBackend(domain_id=test_domain, backend_type='aws')
+            db.session.add(backend)
+            db.session.commit()
+            for key, val in [('aws_access_key_id', 'test'), ('aws_secret_access_key', 'test')]:
+                cfg = BackendConfig(domain_backend_id=backend.id, config_key=key,
+                                    config_value=encrypt_value(val))
+                db.session.add(cfg)
+            hn = Hostname.query.get(test_hostname)
+            hn.backends = [backend]
+            db.session.commit()
+
+        with patch('dyndns.Accounts') as mock_accounts:
+            mock_account = MagicMock()
+            mock_account.hostnameperzone.return_value = {'example.com': ['test.example.com']}
+            mock_account.createrecords.return_value = {'test.example.com': 'good'}
+            mock_accounts.get.return_value = mock_account
+            auth = base64.b64encode(b'testuser:testpass123').decode()
+            resp = client.get('/nic/update?hostname=test.example.com&myip=192.0.2.1',
+                              headers={'Authorization': f'Basic {auth}'})
+            assert b'good' in resp.data
+
+        with app.app_context():
+            hn = Hostname.query.get(test_hostname)
+            assert hn.last_ip_v4 == '192.0.2.1'
+            assert hn.last_updated_at is not None
+
+    def test_health_check_list_page(self, client, admin_user, admin_with_totp):
+        login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
+        resp = client.get('/admin/health-checks')
+        assert resp.status_code == 200
+        assert b'Health Checks' in resp.data
+
+    def test_health_check_config_page(self, client, admin_user, admin_with_totp):
+        login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
+        resp = client.get('/admin/health-checks/config')
+        assert resp.status_code == 200
+        assert b'Health Check Configuration' in resp.data
+
+    def test_health_check_update_config(self, client, admin_user, admin_with_totp, app):
+        login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
+        resp = client.post('/admin/health-checks/config', data={
+            'enabled': 'y',
+            'check_interval_minutes': 30,
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        from models import HealthCheckConfig
+        with app.app_context():
+            config = HealthCheckConfig.query.first()
+            assert config.enabled is True
+            assert config.check_interval_minutes == 30
+
+    def test_run_health_checks_manually(self, client, admin_user, admin_with_totp, regular_user,
+                                         test_domain, test_hostname, app):
+        """Run health checks via the admin UI."""
+        from models import db, Hostname, HealthCheckConfig
+        with app.app_context():
+            hn = Hostname.query.get(test_hostname)
+            hn.last_ip_v4 = '192.0.2.1'
+            config = HealthCheckConfig.query.first()
+            config.enabled = True
+            db.session.commit()
+
+        login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
+        with patch('health_checker.dns.resolver.resolve') as mock_resolve:
+            mock_answer = MagicMock()
+            mock_answer.__iter__ = lambda self: iter([MagicMock(address='192.0.2.1')])
+            mock_answer.__getitem__ = lambda self, idx: MagicMock(address='192.0.2.1')
+            mock_resolve.return_value = mock_answer
+            resp = client.post('/admin/health-checks/run', follow_redirects=True)
+            assert resp.status_code == 200
+            assert b'Health check completed' in resp.data
+
+        from models import HealthCheck
+        with app.app_context():
+            checks = HealthCheck.query.all()
+            assert len(checks) >= 1
+            assert checks[0].status == 'ok'
+
+    def test_health_check_detects_mismatch(self, app, regular_user, test_domain, test_hostname):
+        """Health check detects when DNS doesn't match expected IP."""
+        from models import db, Hostname, HealthCheck, HealthCheckConfig
+        with app.app_context():
+            hn = Hostname.query.get(test_hostname)
+            hn.last_ip_v4 = '192.0.2.1'
+            config = HealthCheckConfig.query.first()
+            config.enabled = True
+            db.session.commit()
+
+        with patch('health_checker.dns.resolver.resolve') as mock_resolve:
+            mock_answer = MagicMock()
+            mock_answer.__iter__ = lambda self: iter([MagicMock(address='192.0.2.99')])
+            mock_answer.__getitem__ = lambda self, idx: MagicMock(address='192.0.2.99')
+            mock_resolve.return_value = mock_answer
+
+            from health_checker import run_health_checks
+            run_health_checks(app)
+
+        with app.app_context():
+            checks = HealthCheck.query.all()
+            assert len(checks) >= 1
+            assert checks[0].status == 'mismatch'
+            assert checks[0].expected_ip == '192.0.2.1'
+            assert checks[0].actual_ip == '192.0.2.99'
+
+    def test_health_check_detects_missing(self, app, regular_user, test_domain, test_hostname):
+        """Health check detects when DNS record is missing."""
+        from models import db, Hostname, HealthCheck, HealthCheckConfig
+        import dns.resolver
+        with app.app_context():
+            hn = Hostname.query.get(test_hostname)
+            hn.last_ip_v4 = '192.0.2.1'
+            config = HealthCheckConfig.query.first()
+            config.enabled = True
+            db.session.commit()
+
+        with patch('health_checker.dns.resolver.resolve', side_effect=dns.resolver.NXDOMAIN):
+            from health_checker import run_health_checks
+            run_health_checks(app)
+
+        with app.app_context():
+            checks = HealthCheck.query.all()
+            assert len(checks) >= 1
+            assert checks[0].status == 'missing'
+
+    def test_health_check_clear(self, client, admin_user, admin_with_totp, app):
+        """Admin can clear health check results."""
+        from models import db, HealthCheck
+        with app.app_context():
+            hc = HealthCheck(hostname='test.example.com', expected_ip='192.0.2.1',
+                             actual_ip='192.0.2.1', record_type='A', status='ok')
+            db.session.add(hc)
+            db.session.commit()
+
+        login_user_full(client, 'admin', ADMIN_PASSWORD, totp_secret=admin_with_totp)
+        resp = client.post('/admin/health-checks/clear', follow_redirects=True)
+        assert resp.status_code == 200
+        with app.app_context():
+            assert HealthCheck.query.count() == 0
+
+    def test_health_check_requires_admin(self, client, regular_user, regular_user_with_totp):
+        """Non-admin users cannot access health check pages."""
+        login_user_full(client, 'testuser', TEST_PASSWORD, totp_secret=regular_user_with_totp)
+        resp = client.get('/admin/health-checks', follow_redirects=True)
+        assert b'Admin access required' in resp.data
+
+    def test_rate_limit_requires_admin(self, client, regular_user, regular_user_with_totp):
+        """Non-admin users cannot access rate limit pages."""
+        login_user_full(client, 'testuser', TEST_PASSWORD, totp_secret=regular_user_with_totp)
+        resp = client.get('/admin/rate-limits', follow_redirects=True)
+        assert b'Admin access required' in resp.data

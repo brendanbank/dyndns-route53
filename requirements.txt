@@ -27,5 +27,6 @@ s3transfer==0.16.0
 six==1.17.0
 urllib3==2.6.3
 werkzeug==3.1.6
+APScheduler==3.10.4
 pytest==9.0.2
 ruff==0.15.6

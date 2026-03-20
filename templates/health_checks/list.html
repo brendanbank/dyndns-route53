@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Health Checks - DynDNS Admin{% endblock %}
+{% block content %}
+<h2>Health Checks</h2>
+
+<div class="d-flex gap-2 mb-3">
+    <a href="{{ url_for('web.health_check_config') }}" class="btn btn-outline-primary btn-sm">Configure</a>
+    <form method="POST" action="{{ url_for('web.health_check_run') }}" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-outline-success btn-sm">Run Now</button>
+    </form>
+    {% if checks.items %}
+    <form method="POST" action="{{ url_for('web.health_check_clear') }}" style="display:inline"
+          onsubmit="return confirm('Clear all health check results?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-outline-danger btn-sm">Clear Results</button>
+    </form>
+    {% endif %}
+</div>
+
+{% if config %}
+<p class="text-muted">
+    Status: {% if config.enabled %}<span class="badge bg-success">Enabled</span>{% else %}<span class="badge bg-secondary">Disabled</span>{% endif %}
+    &mdash; Interval: every {{ config.check_interval_minutes }} minute(s)
+</p>
+{% endif %}
+
+<!-- Filters -->
+<form method="GET" class="row g-2 mb-3">
+    <div class="col-auto">
+        <select name="status" class="form-select form-select-sm">
+            <option value="">All statuses</option>
+            {% for s in ['ok', 'mismatch', 'missing', 'error'] %}
+            <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-auto">
+        <select name="hostname" class="form-select form-select-sm">
+            <option value="">All hostnames</option>
+            {% for hn in hostnames %}
+            <option value="{{ hn.name }}" {% if hostname_filter == hn.name %}selected{% endif %}>{{ hn.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-auto">
+        <button type="submit" class="btn btn-sm btn-outline-primary">Filter</button>
+        {% if status_filter or hostname_filter %}
+        <a href="{{ url_for('web.health_check_list') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+        {% endif %}
+    </div>
+</form>
+
+{% if checks.items %}
+<div class="table-responsive">
+    <table class="table table-sm table-striped">
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Hostname</th>
+                <th>Type</th>
+                <th>Expected</th>
+                <th>Actual</th>
+                <th>Status</th>
+                <th>Detail</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for check in checks.items %}
+            <tr>
+                <td>{{ check.checked_at.strftime('%Y-%m-%d %H:%M:%S') if check.checked_at else '' }}</td>
+                <td>{{ check.hostname }}</td>
+                <td>{{ check.record_type }}</td>
+                <td>{{ check.expected_ip or '' }}</td>
+                <td>{{ check.actual_ip or '' }}</td>
+                <td>
+                    {% if check.status == 'ok' %}
+                    <span class="badge bg-success">ok</span>
+                    {% elif check.status == 'mismatch' %}
+                    <span class="badge bg-warning text-dark">mismatch</span>
+                    {% elif check.status == 'missing' %}
+                    <span class="badge bg-danger">missing</span>
+                    {% else %}
+                    <span class="badge bg-danger">error</span>
+                    {% endif %}
+                </td>
+                <td><small>{{ check.detail or '' }}</small></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+{% if checks.pages > 1 %}
+<nav>
+    <ul class="pagination pagination-sm">
+        {% if checks.has_prev %}
+        <li class="page-item">
+            <a class="page-link" href="{{ url_for('web.health_check_list', page=checks.prev_num, status=status_filter, hostname=hostname_filter) }}">Previous</a>
+        </li>
+        {% endif %}
+        {% for p in checks.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+        {% if p %}
+        <li class="page-item {% if p == checks.page %}active{% endif %}">
+            <a class="page-link" href="{{ url_for('web.health_check_list', page=p, status=status_filter, hostname=hostname_filter) }}">{{ p }}</a>
+        </li>
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">...</span></li>
+        {% endif %}
+        {% endfor %}
+        {% if checks.has_next %}
+        <li class="page-item">
+            <a class="page-link" href="{{ url_for('web.health_check_list', page=checks.next_num, status=status_filter, hostname=hostname_filter) }}">Next</a>
+        </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% else %}
+<p class="text-muted">No health check results yet. Click "Run Now" to perform a check.</p>
+{% endif %}
+{% endblock %}

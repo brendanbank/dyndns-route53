@@ -3,13 +3,110 @@ import bcrypt
 import pyotp
 import qrcode
 import qrcode.image.svg
-from flask import Blueprint, render_template, redirect, url_for, flash, request, session
+from flask import Blueprint, render_template, redirect, url_for, flash, request, session, current_app
 from flask_login import login_user, logout_user, login_required, current_user
 from models import db, User, Domain, DomainBackend, BackendConfig, Hostname, Event, encrypt_value
-from forms import LoginForm, UserForm, PasswordChangeForm, TOTPVerifyForm, TOTPSetupForm, DomainForm, HostnameForm
+from models import RateLimitConfig, HealthCheck, HealthCheckConfig
+from forms import (LoginForm, UserForm, PasswordChangeForm, TOTPVerifyForm, TOTPSetupForm,
+                   DomainForm, HostnameForm, TTLForm, RateLimitForm, HealthCheckConfigForm)
 from auth import admin_required, authenticate_dyndns_user
 
 web_bp = Blueprint('web', __name__)
+
+
+def _log_event(user, event_type, hostname=None, ip_address=None, backend_type=None, response=None, detail=None):
+    """Log a DNS event from the web UI."""
+    from datetime import datetime, timedelta, timezone
+    try:
+        ev = Event(
+            user_id=user.id,
+            username=user.username,
+            event_type=event_type,
+            hostname=hostname,
+            ip_address=ip_address,
+            backend_type=backend_type,
+            response=response,
+            detail=detail,
+        )
+        db.session.add(ev)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        Event.query.filter(Event.created_at < cutoff).delete()
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
+def _perform_dns_update(hn, ip_str):
+    """Run a DNS update for a hostname via all its configured backends.
+
+    Returns a list of (backend_type, status) tuples.
+    """
+    from datetime import datetime, timezone
+    from lib.accounts import BaseAccount
+    from lib import AccountFactory
+
+    accounts = AccountFactory()
+
+    validated_ip = BaseAccount.getip(ip_str)
+    if not validated_ip:
+        flash(f'Invalid IP address: {ip_str}', 'danger')
+        return None
+
+    ip_type = BaseAccount.getiptype(validated_ip)
+    if not ip_type:
+        flash(f'Cannot determine record type for: {ip_str}', 'danger')
+        return None
+
+    backends = hn.get_backends()
+    if not backends:
+        flash(f'No backends configured for {hn.name}.', 'warning')
+        return None
+
+    results = []
+    for db_backend in backends:
+        creds = db_backend.get_credentials()
+        if not creds:
+            _log_event(current_user, 'dns_update', hostname=hn.name,
+                       ip_address=str(validated_ip), backend_type=db_backend.backend_type, response='911')
+            results.append((db_backend.backend_type, '911'))
+            continue
+
+        account_dict = {
+            "service": db_backend.backend_type,
+            "domains": [hn.domain.name],
+            "credentials": creds,
+        }
+        account = accounts.get(account_dict)
+        if not account:
+            _log_event(current_user, 'dns_update', hostname=hn.name,
+                       ip_address=str(validated_ip), backend_type=db_backend.backend_type, response='911')
+            results.append((db_backend.backend_type, '911'))
+            continue
+
+        hostname_zones = account.hostnameperzone([hn.name])
+        if not hostname_zones:
+            _log_event(current_user, 'dns_update', hostname=hn.name,
+                       ip_address=str(validated_ip), backend_type=db_backend.backend_type, response='nohost')
+            results.append((db_backend.backend_type, 'nohost'))
+            continue
+
+        update_results = account.createrecords(str(validated_ip), hostname_zones,
+                                               rtype=ip_type, ttl=hn.ttl)
+        status = update_results.get(hn.name, 'dnserr') if update_results else 'dnserr'
+        _log_event(current_user, 'dns_update', hostname=hn.name,
+                   ip_address=str(validated_ip), backend_type=db_backend.backend_type, response=status)
+        results.append((db_backend.backend_type, status))
+
+    # Track last known IP if any backend succeeded
+    if any(s == 'good' for _, s in results):
+        if ip_type == 'A':
+            hn.last_ip_v4 = str(validated_ip)
+        else:
+            hn.last_ip_v6 = str(validated_ip)
+        hn.last_updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+    return results
 
 ITEMS_PER_PAGE = 20
 
@@ -161,6 +258,9 @@ def dashboard():
         hostname_count = Hostname.query.count()
         event_count = Event.query.count()
         recent_events = Event.query.order_by(Event.created_at.desc()).limit(10).all()
+        health_issues = HealthCheck.query.filter(
+            HealthCheck.status.in_(['mismatch', 'missing', 'error'])
+        ).order_by(HealthCheck.checked_at.desc()).limit(10).all()
     else:
         user_hostnames = Hostname.query.filter_by(user_id=current_user.id).all()
         recent_events = Event.query.filter_by(user_id=current_user.id).order_by(Event.created_at.desc()).limit(10).all()
@@ -174,7 +274,8 @@ def dashboard():
     if current_user.is_admin:
         return render_template('dashboard.html', user_count=user_count, domain_count=domain_count,
                                hostname_count=hostname_count, event_count=event_count,
-                               recent_events=recent_events, user_map=user_map, hostname_map=hostname_map)
+                               recent_events=recent_events, user_map=user_map, hostname_map=hostname_map,
+                               health_issues=health_issues)
     else:
         return render_template('dashboard.html', user_hostnames=user_hostnames, recent_events=recent_events,
                                user_map=user_map, hostname_map=hostname_map)
@@ -388,7 +489,7 @@ def user_hostnames(user_id):
             if existing:
                 flash(f'Hostname "{fqdn}" is already registered.', 'warning')
             else:
-                hn = Hostname(name=fqdn, domain_id=domain.id, user_id=user.id)
+                hn = Hostname(name=fqdn, domain_id=domain.id, user_id=user.id, ttl=form.ttl.data)
                 db.session.add(hn)
                 db.session.commit()
                 flash(f'Hostname "{fqdn}" added.', 'success')
@@ -421,17 +522,33 @@ def user_hostname_backends(user_id, hn_id):
         return redirect(url_for('web.user_hostnames', user_id=user_id))
 
     domain_backends = hn.domain.backends
+    ttl_form = TTLForm(obj=hn)
 
     if request.method == 'POST':
-        selected_ids = request.form.getlist('backend_ids', type=int)
-        # Clear and set new backends
-        hn.backends = [b for b in domain_backends if b.id in selected_ids]
-        db.session.commit()
-        flash(f'Backend configuration for "{hn.name}" updated.', 'success')
-        return redirect(url_for('web.user_hostnames', user_id=user_id))
+        if 'save_ttl' in request.form:
+            ttl_form = TTLForm()
+            if ttl_form.validate_on_submit():
+                hn.ttl = ttl_form.ttl.data
+                db.session.commit()
+                flash(f'TTL for "{hn.name}" updated to {hn.ttl}s.', 'success')
+            return redirect(url_for('web.user_hostname_backends', user_id=user_id, hn_id=hn_id))
+        elif 'dns_update' in request.form:
+            ip_str = request.form.get('update_ip', '').strip()
+            dns_update_result = _perform_dns_update(hn, ip_str)
+            if dns_update_result is not None:
+                return render_template('hostnames/backends.html', user=user, hostname=hn,
+                                       domain_backends=domain_backends, is_admin_view=True,
+                                       ttl_form=ttl_form, dns_update_result=dns_update_result)
+            return redirect(url_for('web.user_hostname_backends', user_id=user_id, hn_id=hn_id))
+        else:
+            selected_ids = request.form.getlist('backend_ids', type=int)
+            hn.backends = [b for b in domain_backends if b.id in selected_ids]
+            db.session.commit()
+            flash(f'Backend configuration for "{hn.name}" updated.', 'success')
+            return redirect(url_for('web.user_hostnames', user_id=user_id))
 
     return render_template('hostnames/backends.html', user=user, hostname=hn,
-                           domain_backends=domain_backends, is_admin_view=True)
+                           domain_backends=domain_backends, is_admin_view=True, ttl_form=ttl_form)
 
 
 # --- Hostname Management (User self-service) ---
@@ -452,7 +569,7 @@ def my_hostnames():
             if existing:
                 flash(f'Hostname "{fqdn}" is already registered.', 'warning')
             else:
-                hn = Hostname(name=fqdn, domain_id=domain.id, user_id=current_user.id)
+                hn = Hostname(name=fqdn, domain_id=domain.id, user_id=current_user.id, ttl=form.ttl.data)
                 db.session.add(hn)
                 db.session.commit()
                 flash(f'Hostname "{fqdn}" added.', 'success')
@@ -486,17 +603,33 @@ def my_hostname_backends(hn_id):
         return redirect(url_for('web.my_hostnames'))
 
     domain_backends = hn.domain.backends
+    ttl_form = TTLForm(obj=hn)
 
     if request.method == 'POST':
-        selected_ids = request.form.getlist('backend_ids', type=int)
-        # Clear and set new backends
-        hn.backends = [b for b in domain_backends if b.id in selected_ids]
-        db.session.commit()
-        flash(f'Backend configuration for "{hn.name}" updated.', 'success')
-        return redirect(url_for('web.my_hostnames'))
+        if 'save_ttl' in request.form:
+            ttl_form = TTLForm()
+            if ttl_form.validate_on_submit():
+                hn.ttl = ttl_form.ttl.data
+                db.session.commit()
+                flash(f'TTL for "{hn.name}" updated to {hn.ttl}s.', 'success')
+            return redirect(url_for('web.my_hostname_backends', hn_id=hn_id))
+        elif 'dns_update' in request.form:
+            ip_str = request.form.get('update_ip', '').strip()
+            dns_update_result = _perform_dns_update(hn, ip_str)
+            if dns_update_result is not None:
+                return render_template('hostnames/backends.html', user=current_user, hostname=hn,
+                                       domain_backends=domain_backends, is_admin_view=False,
+                                       ttl_form=ttl_form, dns_update_result=dns_update_result)
+            return redirect(url_for('web.my_hostname_backends', hn_id=hn_id))
+        else:
+            selected_ids = request.form.getlist('backend_ids', type=int)
+            hn.backends = [b for b in domain_backends if b.id in selected_ids]
+            db.session.commit()
+            flash(f'Backend configuration for "{hn.name}" updated.', 'success')
+            return redirect(url_for('web.my_hostnames'))
 
     return render_template('hostnames/backends.html', user=current_user, hostname=hn,
-                           domain_backends=domain_backends, is_admin_view=False)
+                           domain_backends=domain_backends, is_admin_view=False, ttl_form=ttl_form)
 
 
 # --- Events ---
@@ -598,3 +731,135 @@ def user_reset_totp(user_id):
 @login_required
 def help_page():
     return render_template('help.html')
+
+
+# --- Rate Limiting (Admin) ---
+
+@web_bp.route('/admin/rate-limits', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def rate_limit_global():
+    config = RateLimitConfig.query.filter_by(is_global=True).first()
+    form = RateLimitForm(obj=config)
+    if form.validate_on_submit():
+        config.requests_per_minute = form.requests_per_minute.data
+        config.requests_per_hour = form.requests_per_hour.data
+        db.session.commit()
+        flash('Global rate limits updated.', 'success')
+        return redirect(url_for('web.rate_limit_global'))
+
+    # Per-user overrides
+    user_overrides = RateLimitConfig.query.filter(RateLimitConfig.is_global == False).all()  # noqa: E712
+    users = User.query.order_by(User.username).all()
+    return render_template('rate_limits/edit.html', form=form, config=config,
+                           user_overrides=user_overrides, users=users)
+
+
+@web_bp.route('/admin/rate-limits/user/<int:user_id>', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def rate_limit_user(user_id):
+    user = User.query.get_or_404(user_id)
+    config = RateLimitConfig.query.filter_by(user_id=user_id).first()
+    if not config:
+        global_config = RateLimitConfig.query.filter_by(is_global=True).first()
+        config = RateLimitConfig(user_id=user_id, is_global=False,
+                                 requests_per_minute=global_config.requests_per_minute,
+                                 requests_per_hour=global_config.requests_per_hour)
+        db.session.add(config)
+        db.session.commit()
+
+    form = RateLimitForm(obj=config)
+    if form.validate_on_submit():
+        config.requests_per_minute = form.requests_per_minute.data
+        config.requests_per_hour = form.requests_per_hour.data
+        db.session.commit()
+        flash(f'Rate limits for "{user.username}" updated.', 'success')
+        return redirect(url_for('web.rate_limit_global'))
+
+    return render_template('rate_limits/user_edit.html', form=form, user=user, config=config)
+
+
+@web_bp.route('/admin/rate-limits/user/<int:user_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def rate_limit_user_delete(user_id):
+    config = RateLimitConfig.query.filter_by(user_id=user_id).first()
+    if config:
+        db.session.delete(config)
+        db.session.commit()
+        flash('User rate limit override removed.', 'success')
+    return redirect(url_for('web.rate_limit_global'))
+
+
+# --- Health Checks (Admin) ---
+
+@web_bp.route('/admin/health-checks')
+@login_required
+@admin_required
+def health_check_list():
+    page = request.args.get('page', 1, type=int)
+    status_filter = request.args.get('status', '')
+    hostname_filter = request.args.get('hostname', '')
+
+    query = HealthCheck.query
+
+    if status_filter:
+        query = query.filter(HealthCheck.status == status_filter)
+    if hostname_filter:
+        query = query.filter(HealthCheck.hostname == hostname_filter)
+
+    checks = query.order_by(HealthCheck.checked_at.desc()).paginate(
+        page=page, per_page=ITEMS_PER_PAGE, error_out=False)
+
+    # Get unique hostnames for filter dropdown
+    hostnames = Hostname.query.filter(
+        (Hostname.last_ip_v4.isnot(None)) | (Hostname.last_ip_v6.isnot(None))
+    ).order_by(Hostname.name).all()
+
+    config = HealthCheckConfig.query.first()
+
+    return render_template('health_checks/list.html', checks=checks,
+                           status_filter=status_filter, hostname_filter=hostname_filter,
+                           hostnames=hostnames, config=config)
+
+
+@web_bp.route('/admin/health-checks/config', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def health_check_config():
+    config = HealthCheckConfig.query.first()
+    form = HealthCheckConfigForm(obj=config)
+    if form.validate_on_submit():
+        config.enabled = form.enabled.data
+        config.check_interval_minutes = form.check_interval_minutes.data
+        db.session.commit()
+        flash('Health check configuration updated.', 'success')
+
+        # Reschedule the health checker
+        from health_checker import reschedule_health_checker
+        reschedule_health_checker(current_app)
+
+        return redirect(url_for('web.health_check_config'))
+
+    return render_template('health_checks/config.html', form=form, config=config)
+
+
+@web_bp.route('/admin/health-checks/run', methods=['POST'])
+@login_required
+@admin_required
+def health_check_run():
+    from health_checker import run_health_checks
+    run_health_checks(current_app)
+    flash('Health check completed.', 'success')
+    return redirect(url_for('web.health_check_list'))
+
+
+@web_bp.route('/admin/health-checks/clear', methods=['POST'])
+@login_required
+@admin_required
+def health_check_clear():
+    count = HealthCheck.query.delete()
+    db.session.commit()
+    flash(f'Deleted {count} health check result(s).', 'success')
+    return redirect(url_for('web.health_check_list'))

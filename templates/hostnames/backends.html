@@ -50,6 +50,73 @@
     </div>
 </div>
 
+<hr>
+
+<h4>TTL Configuration</h4>
+<div class="row">
+    <div class="col-md-6">
+        <form method="POST">
+            {{ ttl_form.hidden_tag() }}
+            <div class="mb-3">
+                {{ ttl_form.ttl.label(class="form-label") }}
+                {{ ttl_form.ttl(class="form-control", style="max-width: 150px") }}
+                <div class="form-text">Between 30 and 86400 seconds (current: {{ hostname.ttl }}s)</div>
+                {% for error in ttl_form.ttl.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+            </div>
+            <button type="submit" name="save_ttl" value="1" class="btn btn-primary">Save TTL</button>
+        </form>
+    </div>
+</div>
+
+<hr>
+
+<h4>DNS Update</h4>
+<p class="text-muted">Send a DNS update for this hostname. The IP will be pushed to all configured backends.</p>
+<div class="row">
+    <div class="col-md-6">
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+                <label class="form-label" for="update_ip">IP Address</label>
+                <input type="text" class="form-control" name="update_ip" id="update_ip"
+                       value="{{ hostname.last_ip_v4 or hostname.last_ip_v6 or '' }}"
+                       placeholder="e.g. 203.0.113.1 or 2001:db8::1"
+                       style="max-width: 300px" required>
+            </div>
+            <input type="hidden" name="dns_update" value="1">
+            <button type="submit" class="btn btn-warning" id="dns-update-btn"
+                    onclick="this.innerHTML='<span class=\'spinner-border spinner-border-sm\' role=\'status\'></span> Updating DNS...'; this.disabled=true; this.form.submit();">
+                Update DNS
+            </button>
+        </form>
+    </div>
+</div>
+
+{% if dns_update_result is defined and dns_update_result %}
+<div class="mt-3">
+    <h5>Result</h5>
+    <div class="table-responsive">
+        <table class="table table-sm">
+            <thead><tr><th>Backend</th><th>Status</th></tr></thead>
+            <tbody>
+                {% for backend_type, status in dns_update_result %}
+                <tr>
+                    <td>{{ backend_type }}</td>
+                    <td>
+                        {% if status == 'good' %}<span class="badge bg-success">good</span>
+                        {% elif status == 'nochg' %}<span class="badge bg-info">nochg</span>
+                        {% else %}<span class="badge bg-danger">{{ status }}</span>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
 <div class="mt-3">
     <small class="text-muted">
         Currently using:

@@ -108,6 +108,10 @@ class Hostname(db.Model):
     name = db.Column(db.String(255), unique=True, nullable=False)
     domain_id = db.Column(db.Integer, db.ForeignKey('domains.id', ondelete='CASCADE'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    ttl = db.Column(db.Integer, nullable=False, default=60)
+    last_ip_v4 = db.Column(db.String(45), nullable=True)
+    last_ip_v6 = db.Column(db.String(45), nullable=True)
+    last_updated_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     domain = db.relationship('Domain', back_populates='hostnames')
@@ -133,6 +137,53 @@ class BackendConfig(db.Model):
     domain_backend = db.relationship('DomainBackend', back_populates='configs')
 
     __table_args__ = (db.UniqueConstraint('domain_backend_id', 'config_key'),)
+
+
+class RateLimitConfig(db.Model):
+    __tablename__ = 'rate_limit_configs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=True, unique=True)
+    requests_per_minute = db.Column(db.Integer, nullable=False, default=30)
+    requests_per_hour = db.Column(db.Integer, nullable=False, default=500)
+    is_global = db.Column(db.Boolean, nullable=False, default=False)
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc),
+                           onupdate=lambda: datetime.now(timezone.utc))
+
+    user = db.relationship('User', backref=db.backref('rate_limit', uselist=False))
+
+
+class RateLimitEvent(db.Model):
+    __bind_key__ = 'events'
+    __tablename__ = 'rate_limit_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class HealthCheck(db.Model):
+    __bind_key__ = 'events'
+    __tablename__ = 'health_checks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    hostname = db.Column(db.String(255), nullable=False)
+    expected_ip = db.Column(db.String(45))
+    actual_ip = db.Column(db.String(45))
+    record_type = db.Column(db.String(4))
+    status = db.Column(db.String(20))  # ok, mismatch, missing, error
+    detail = db.Column(db.Text)
+    checked_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class HealthCheckConfig(db.Model):
+    __tablename__ = 'health_check_config'
+
+    id = db.Column(db.Integer, primary_key=True)
+    check_interval_minutes = db.Column(db.Integer, nullable=False, default=15)
+    enabled = db.Column(db.Boolean, nullable=False, default=True)
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc),
+                           onupdate=lambda: datetime.now(timezone.utc))
 
 
 class Event(db.Model):

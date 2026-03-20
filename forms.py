@@ -1,6 +1,6 @@
 from flask_wtf import FlaskForm
-from wtforms import StringField, PasswordField, SelectField, BooleanField, SubmitField
-from wtforms.validators import DataRequired, Length, Optional, ValidationError
+from wtforms import StringField, PasswordField, SelectField, BooleanField, SubmitField, IntegerField
+from wtforms.validators import DataRequired, Length, Optional, ValidationError, NumberRange
 from models import User
 
 
@@ -57,4 +57,28 @@ class DomainForm(FlaskForm):
 class HostnameForm(FlaskForm):
     prefix = StringField('Hostname Prefix', validators=[DataRequired(), Length(max=255)])
     domain_id = SelectField('Domain', coerce=int, validators=[DataRequired()])
+    ttl = IntegerField('TTL (seconds)', default=60,
+                       validators=[DataRequired(), NumberRange(min=30, max=86400,
+                       message='TTL must be between 30 and 86400 seconds')])
     submit = SubmitField('Add Hostname')
+
+
+class TTLForm(FlaskForm):
+    ttl = IntegerField('TTL (seconds)', validators=[DataRequired(), NumberRange(min=30, max=86400,
+                       message='TTL must be between 30 and 86400 seconds')])
+    submit = SubmitField('Save TTL')
+
+
+class RateLimitForm(FlaskForm):
+    requests_per_minute = IntegerField('Requests per minute',
+                                       validators=[DataRequired(), NumberRange(min=1, max=1000)])
+    requests_per_hour = IntegerField('Requests per hour',
+                                     validators=[DataRequired(), NumberRange(min=1, max=10000)])
+    submit = SubmitField('Save')
+
+
+class HealthCheckConfigForm(FlaskForm):
+    enabled = BooleanField('Enable health checks')
+    check_interval_minutes = IntegerField('Check interval (minutes)',
+                                          validators=[DataRequired(), NumberRange(min=1, max=1440)])
+    submit = SubmitField('Save')

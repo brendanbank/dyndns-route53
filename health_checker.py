@@ -1,5 +1,3 @@
-from datetime import datetime, timedelta, timezone
-
 import dns.resolver
 
 from lib import log
@@ -15,6 +13,9 @@ def run_health_checks(app):
         config = HealthCheckConfig.query.first()
         if config and not config.enabled:
             return
+
+        # Clear previous results — only keep the latest run
+        HealthCheck.query.delete()
 
         hostnames = Hostname.query.filter(
             (Hostname.last_ip_v4.isnot(None)) | (Hostname.last_ip_v6.isnot(None))
@@ -67,9 +68,6 @@ def run_health_checks(app):
                 )
                 db.session.add(hc)
 
-        # Prune health checks older than 24 hours
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-        HealthCheck.query.filter(HealthCheck.checked_at < cutoff).delete()
         db.session.commit()
         log.info(f'Health check completed for {len(hostnames)} hostname(s)')
 

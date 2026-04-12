@@ -68,20 +68,27 @@ User 1---* Hostname *---* DomainBackend *---1 Domain
 
 - **Domain** — global zone managed by admin (e.g. `dyn.bgwlan.nl`). Has backends and hostnames.
 - **DomainBackend** — backend config for a domain (aws/nsupdate/hetzner). Unique constraint on `(domain_id, backend_type)`. Has credentials via BackendConfig.
-- **Hostname** — user-owned FQDN, globally unique (e.g. `myhost.dyn.bgwlan.nl`). Belongs to one domain and one user. Has optional many-to-many relationship with backends via `hostname_backends` table.
+- **Hostname** — user-owned FQDN, globally unique (e.g. `myhost.dyn.bgwlan.nl`). Belongs to one domain and one user. Has configurable TTL (30–86400s, default 60). Stores last known IPv4/IPv6. Has optional many-to-many relationship with backends via `hostname_backends` table.
 - **BackendConfig** — per-backend encrypted key-value pairs (e.g. `aws_access_key_id`). FK to `domain_backends`. Values Fernet-encrypted.
-- **User** — username, bcrypt password hash, role (`admin`/`user`), active flag, TOTP secret. Has hostnames.
+- **User** — username, bcrypt password hash, role (`admin`/`user`), active flag, TOTP secret, `web_login` flag (controls web UI access independently of API access). Has hostnames.
 - **Event** — DNS update audit log (separate SQLite bind `events`). Records user, hostname, IP, backend, response.
+- **RateLimitConfig** — global defaults or per-user overrides for `requests_per_minute` / `requests_per_hour`. `is_global=True` row is the fallback; per-user rows have `user_id` set.
+- **RateLimitEvent** — timestamped request log used by the rate limiter. Pruned automatically to the last hour.
+- **HealthCheck** — result of the most recent health check run per hostname/record-type. Cleared before each run.
+- **HealthCheckConfig** — single-row config: `enabled` flag and `check_interval_minutes`.
 
 ### Request Flow
 
+`GET /nic/checkip` — unauthenticated. Returns the client's IP as seen by the server. HTML by default; `?format=plain` returns just the IP.
+
 `GET /nic/update` authenticates via HTTP Basic Auth (or query params) against the `users` table. For each hostname in the request:
-1. Look up `Hostname` record by exact name match + user ownership
-2. If not found → `nohost`
-3. Get backends for the hostname via `Hostname.get_backends()` — returns hostname-specific backends if configured, otherwise all domain backends
-4. For each backend: get Fernet-encrypted credentials, create account via `AccountFactory`, call `createrecords()`
-5. Log one `Event` per backend attempt
-6. Aggregate result: `good` if any backend succeeded, `nochg` if all unchanged, error otherwise
+1. Check rate limit via `check_rate_limit()` — returns `abuse` if exceeded
+2. Look up `Hostname` record by exact name match + user ownership
+3. If not found → `nohost`
+4. Get backends for the hostname via `Hostname.get_backends()` — returns hostname-specific backends if configured, otherwise all domain backends
+5. For each backend: get Fernet-encrypted credentials, create account via `AccountFactory`, call `createrecords()` passing the hostname's TTL
+6. Log one `Event` per backend attempt
+7. Aggregate result: `good` if any backend succeeded, `nochg` if all unchanged, error otherwise
 
 The `updatetype` parameter is deprecated and ignored — all backends for the domain are updated automatically.
 
@@ -93,6 +100,8 @@ The `updatetype` parameter is deprecated and ignored — all backends for the do
 - `lib/account/aws.py` — `AWS` class: updates/deletes Route53 records via boto3. Reads credentials from `account['credentials']` dict (DB-backed) with env var fallback.
 - `lib/account/nsupdate.py` — `nsupdate` class: updates/deletes BIND DNS records via TSIG-authenticated `dns.update`/`dns.query.tcp`. Same credential pattern.
 - `lib/account/hetzner.py` — `Hetzner` class: updates/deletes DNS records via the Hetzner Cloud API (`api.hetzner.cloud/v1`). Uses Bearer token auth and RRSet-based operations (records identified by `name/type`). Updates use the `set_records` action endpoint. Same credential pattern (`HETZNER_API_TOKEN` env var fallback).
+- `rate_limiter.py` — `RateLimiter` class and `check_rate_limit()`. Database-backed, shared across gunicorn workers. Checks per-user override then global config; built-in fallback is 30 req/min and 500 req/hour.
+- `health_checker.py` — `run_health_checks()` and `init_health_checker()`. Resolves all hostnames with a known last IP and compares against DNS. Run on a schedule via APScheduler (`BackgroundScheduler`). Non-ok results appear on the admin dashboard and emit WARNING/ERROR log messages.
 
 Backend plugins accept domains from `account['domains']` and credentials from `account['credentials']`, falling back to environment variables for backward compatibility.
 
@@ -102,8 +111,8 @@ To add a new DNS backend: create a new file in `lib/account/`, subclass `BaseAcc
 
 Bootstrap 5 dark-theme UI at `/admin/`. Flask-Login session auth.
 
-**Admin routes:** user CRUD, global domain CRUD, per-domain backend management + credential config, per-user hostname management, event log viewer.
-**User self-service:** register/remove hostnames under available domains, browse own event history, change password.
+**Admin routes:** user CRUD (including `web_login` toggle), global domain CRUD, per-domain backend management + credential config, per-user hostname management, event log viewer, rate limit config (global defaults + per-user overrides), DNS health check dashboard + config.
+**User self-service:** register/remove hostnames (with TTL) under available domains, trigger immediate DNS update from the Backends page, browse own event history, change password, reset own 2FA.
 
 ### Auth (`auth.py`)
 
@@ -114,13 +123,16 @@ Web login is a multi-step flow: password verification stores `pending_2fa_user_i
 ### Key behaviors
 
 - Before updating DNS, `check_hostnameon_server()` resolves the current record against the authoritative nameserver. If the IP hasn't changed, the update is skipped.
-- Hostnames are globally unique — each hostname belongs to exactly one user and one domain.
+- Hostnames are globally unique — each hostname belongs to exactly one user and one domain. Each hostname carries its own TTL (30–86400s) passed through to all backends.
 - Users register hostnames under admin-created domains. When updated via `/nic/update`, all backends configured for the hostname's domain are called.
 - Passwords are stored as bcrypt hashes in the `users` table.
 - Authentication uses constant-time comparison (`hmac.compare_digest`) to prevent timing attacks.
 - Backend credentials are Fernet-encrypted at rest per domain backend. Loss of `FERNET_KEY` = loss of all stored credentials.
 - Werkzeug's `ProxyFix` middleware (`x_for=1`) ensures `request.remote_addr` reflects the real client IP from Traefik's `X-Forwarded-For` header.
 - SQLite WAL mode enabled for concurrent read access under gunicorn workers.
+- Rate limiting is applied per user before DNS processing. Exceeding the limit returns `abuse`. Limits are stored in SQLite and consistent across all workers.
+- `web_login` flag on `User` blocks web UI login while leaving DynDNS API access unaffected. New users default to `web_login=False`.
+- APScheduler runs DNS health checks in a background thread. Results are written to the `HealthCheck` table and cleared before each run. The admin dashboard shows a warning panel for any non-ok results.
 
 ## Environment Variables
 
@@ -185,7 +197,7 @@ There are two compose files:
 
 ## Testing
 
-**Pytest (111 tests):**
+**Pytest (146 tests):**
 ```
 python -m pytest tests/ -v
 ```

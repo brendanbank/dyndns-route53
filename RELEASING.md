@@ -25,7 +25,7 @@
 
 When you push a `v*` tag, the GitHub Actions workflow:
 
-1. Runs **ruff** lint check and **pytest** (111 functional tests)
+1. Runs **ruff** lint check and **pytest** (146 functional tests)
 2. Builds a multi-platform Docker image (`linux/amd64` + `linux/arm64`)
 3. Pushes it to `ghcr.io/brendanbank/dyndns-route53` with semver tags
 4. Runs **Trivy** vulnerability scan

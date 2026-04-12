@@ -44,6 +44,14 @@ The admin interface is at `/admin/login`. After logging in with your password, y
 
 ## API Endpoints
 
+### Check IP
+
+```
+GET /nic/checkip
+```
+
+Returns your public IP address as seen by the server. No authentication required. Add `?format=plain` to get just the IP address (useful for scripts).
+
 ### Update DNS record
 
 ```
@@ -68,6 +76,9 @@ GET /nic/delete?hostname=<hostname>&myip=<ip>
 **Examples:**
 
 ```bash
+# Check your public IP
+curl "https://dyndns.example.com/nic/checkip?format=plain"
+
 # Update a record
 curl -u username:password "https://dyndns.example.com/nic/update?hostname=home.dyn.example.com&myip=203.0.113.1"
 
@@ -75,7 +86,7 @@ curl -u username:password "https://dyndns.example.com/nic/update?hostname=home.d
 curl -u username:password "https://dyndns.example.com/nic/delete?hostname=home.dyn.example.com"
 ```
 
-**Responses:** `good <ip>`, `nochg <ip>`, `badauth`, `notfqdn`, `nohost`, `911`
+**Responses:** `good <ip>`, `nochg <ip>`, `badauth`, `notfqdn`, `nohost`, `abuse`, `911`
 
 ## How It Works
 

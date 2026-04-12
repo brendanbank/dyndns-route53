@@ -149,7 +149,7 @@ docker run --rm ghcr.io/brendanbank/dyndns-route53:latest python3 /app/getpwd.py
 ### Automated tests
 
 ```bash
-# Run the pytest suite (111 tests)
+# Run the pytest suite (146 tests)
 python -m pytest tests/ -v
 
 # Lint check
@@ -206,6 +206,7 @@ curl -k -u username:password \
 - `nohost <ip>` — hostname not in user's assigned domains
 - `badauth` — invalid credentials
 - `notfqdn` — invalid hostname format
+- `abuse` — rate limit exceeded
 - `911` — server error
 
 ## Backup & Restore

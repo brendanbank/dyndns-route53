@@ -190,9 +190,10 @@ home.dyn.example.com</code></pre>
             <div class="accordion-body">
                 <ul>
                     <li><strong>Dashboard</strong> &mdash; View your registered hostnames and recent DNS update events.</li>
-                    <li><strong>Hostnames</strong> &mdash; Register new hostnames under available domains, or remove existing ones.</li>
+                    <li><strong>Hostnames</strong> &mdash; Register new hostnames under available domains, or remove existing ones. Each hostname has a configurable <strong>TTL</strong> (30&ndash;86400 seconds, default 60).</li>
+                    <li><strong>Backends</strong> &mdash; View the backends assigned to a hostname. You can also trigger an immediate DNS update from this page using the current IP.</li>
                     <li><strong>Events</strong> &mdash; Browse your full event history with filtering by hostname.</li>
-                    <li><strong>Profile</strong> &mdash; Change your password. Click your username in the navigation bar.</li>
+                    <li><strong>Profile</strong> &mdash; Change your password or reset your 2FA. Click your username in the navigation bar.</li>
                 </ul>
             </div>
         </div>
@@ -214,6 +215,7 @@ home.dyn.example.com</code></pre>
                     <li><strong>Edit</strong> &mdash; Click a username to change their password, role, or active status. Leave the password field empty to keep the current password.</li>
                     <li><strong>Hostnames</strong> &mdash; Click "Hostnames" to manage which hostnames a user can update.</li>
                     <li><strong>Activate / Deactivate</strong> &mdash; Uncheck "Active" to disable a user without deleting them. Deactivated users cannot log in or update DNS records.</li>
+                    <li><strong>Web Login</strong> &mdash; Controls whether the user can log in to the web UI. Disable this for API-only accounts that should not have web access; DynDNS API access is unaffected. New users default to web login disabled.</li>
                     <li><strong>Delete</strong> &mdash; Permanently removes the user and all their hostname registrations. You cannot delete your own account.</li>
                 </ul>
                 <h5>Roles</h5>
@@ -237,7 +239,7 @@ home.dyn.example.com</code></pre>
                 <p>Navigate to <strong>Domains</strong> in the navigation bar. Domains are global zones that users can register hostnames under.</p>
                 <ul>
                     <li><strong>Add Domain</strong> &mdash; Enter the parent domain (e.g. <code>dyn.example.com</code>). Users can then register hostnames under it (e.g. <code>home.dyn.example.com</code>).</li>
-                    <li><strong>Backends</strong> &mdash; Each domain can have one or more backends (<code>aws</code>, <code>nsupdate</code>). When a hostname is updated, all backends for its domain are called.</li>
+                    <li><strong>Backends</strong> &mdash; Each domain can have one or more backends (<code>aws</code>, <code>nsupdate</code>, <code>hetzner</code>). When a hostname is updated, all backends for its domain are called.</li>
                     <li><strong>Credentials</strong> &mdash; Configure backend credentials per domain via the "Configure" button. Credentials are shared across all users of that domain.</li>
                     <li><strong>Delete</strong> &mdash; Removes the domain, all its backends, and all registered hostnames.</li>
                 </ul>
@@ -281,9 +283,68 @@ home.dyn.example.com</code></pre>
                         </tbody>
                     </table>
                 </div>
+
+                <h5 class="mt-3">Hetzner Cloud DNS</h5>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead><tr><th>Key</th><th>Description</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>hetzner_api_token</code></td><td>Hetzner Cloud API token with DNS read/write permissions.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p>The token must have access to the zone containing the hostname. Zones are looked up automatically by name; sub-zones (e.g. <code>dyn.example.com</code> inside the <code>example.com</code> Hetzner zone) are supported.</p>
             </div>
         </div>
     </div>
+    <!-- Admin: Rate Limiting -->
+    <div class="accordion-item">
+        <h2 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseRateLimits">
+                Rate Limiting
+            </button>
+        </h2>
+        <div id="collapseRateLimits" class="accordion-collapse collapse" data-bs-parent="#helpAccordion">
+            <div class="accordion-body">
+                <p>Navigate to <strong>Rate Limits</strong> in the navigation bar to configure request throttling for the <code>/nic/update</code> and <code>/nic/delete</code> endpoints.</p>
+                <p>Limits are database-backed and shared across all gunicorn workers. When a user exceeds the limit the endpoint returns <span class="badge bg-danger">abuse</span>.</p>
+                <h5>Global defaults</h5>
+                <p>Set a per-minute and per-hour request limit that applies to all users. The built-in fallback is <strong>30 requests/minute</strong> and <strong>500 requests/hour</strong>.</p>
+                <h5>Per-user overrides</h5>
+                <p>Click a username in the "Add Override" section to set a custom limit for that user. Overrides take precedence over the global defaults. Remove an override to revert to the global limit.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin: Health Checks -->
+    <div class="accordion-item">
+        <h2 class="accordion-header">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseHealthChecks">
+                DNS Health Checks
+            </button>
+        </h2>
+        <div id="collapseHealthChecks" class="accordion-collapse collapse" data-bs-parent="#helpAccordion">
+            <div class="accordion-body">
+                <p>Navigate to <strong>Health Checks</strong> in the navigation bar. The health checker periodically resolves all tracked hostnames and compares the DNS result against the last known IP stored in the database.</p>
+                <h5>Statuses</h5>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+                        <tbody>
+                            <tr><td><span class="badge bg-success">ok</span></td><td>DNS record matches the last known IP.</td></tr>
+                            <tr><td><span class="badge bg-warning text-dark">mismatch</span></td><td>DNS record exists but resolves to a different IP.</td></tr>
+                            <tr><td><span class="badge bg-danger">missing</span></td><td>No DNS record found for the hostname.</td></tr>
+                            <tr><td><span class="badge bg-danger">error</span></td><td>DNS resolution failed (no nameservers, timeout, etc.).</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <h5>Configuration</h5>
+                <p>Click <strong>Configure</strong> to enable/disable automatic checks and set the interval (1&ndash;1440 minutes). Click <strong>Run Now</strong> to trigger an immediate check. Results are retained until the next run.</p>
+                <p>Non-ok results are surfaced as a warning panel on the admin Dashboard. Mismatches and missing records also emit <code>WARNING</code> log messages (useful for Loki alerting).</p>
+            </div>
+        </div>
+    </div>
+
     {% endif %}
 
 </div>

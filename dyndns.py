@@ -259,9 +259,8 @@ def find_hostname(user, hostname_str):
 @nic_update_bp.route("/nic/checkip")
 def checkip():
     """Return the caller's public IP address, like checkip.dyndns.com."""
-    ip = request.remote_addr or ""
     try:
-        ipaddress.ip_address(ip)
+        ip = str(ipaddress.ip_address(request.remote_addr or ""))
     except ValueError:
         ip = ""
     fmt = request.args.get("format", "html")

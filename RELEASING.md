@@ -21,6 +21,12 @@
 
    The tag **must** start with `v` (e.g. `v1.0.0`, `v1.2.3`).
 
+3. After the build workflow completes, create the GitHub Release manually with curated notes:
+   ```bash
+   gh release create v1.2.3 --notes-file release-notes.md
+   ```
+   Notes should group changes by category (security, features, dependency updates) and list the specific packages bumped — not just the dependabot commit titles.
+
 ## What Happens Automatically
 
 When you push a `v*` tag, the GitHub Actions workflow:
@@ -29,9 +35,8 @@ When you push a `v*` tag, the GitHub Actions workflow:
 2. Builds a multi-platform Docker image (`linux/amd64` + `linux/arm64`)
 3. Pushes it to `ghcr.io/brendanbank/dyndns-route53` with semver tags
 4. Runs **Trivy** vulnerability scan
-5. Creates a GitHub Release with auto-generated release notes
 
-If the lint or test step fails, the Docker image is not built or pushed.
+The GitHub Release itself is **not** created by CI — write it manually so subscribers receive curated notes rather than a list of commit titles. If the lint or test step fails, the Docker image is not built or pushed.
 
 ### Image Tag Strategy
 

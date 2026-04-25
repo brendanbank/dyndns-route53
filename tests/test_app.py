@@ -868,6 +868,19 @@ class TestCheckIP:
         resp = client.get('/nic/checkip')
         assert resp.status_code == 200
 
+    def test_checkip_rejects_non_ip_remote_addr(self, client):
+        """Spoofed X-Forwarded-For with HTML/script must not be echoed."""
+        bad = '<script>alert(1)</script>'
+        resp_plain = client.get('/nic/checkip?format=plain',
+                                environ_overrides={'REMOTE_ADDR': bad})
+        assert resp_plain.status_code == 200
+        assert resp_plain.mimetype == 'text/plain'
+        assert resp_plain.data == b''
+        resp_html = client.get('/nic/checkip',
+                               environ_overrides={'REMOTE_ADDR': bad})
+        assert resp_html.status_code == 200
+        assert b'<script>' not in resp_html.data
+
 
 # ==============================================================================
 # TTL Management

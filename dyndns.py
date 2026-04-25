@@ -30,6 +30,7 @@
 
 from flask import Flask, request, make_response
 import html
+import ipaddress
 from werkzeug.middleware.proxy_fix import ProxyFix
 import re
 import os
@@ -258,14 +259,17 @@ def find_hostname(user, hostname_str):
 @nic_update_bp.route("/nic/checkip")
 def checkip():
     """Return the caller's public IP address, like checkip.dyndns.com."""
-    ip = request.remote_addr
+    ip = request.remote_addr or ""
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        ip = ""
     fmt = request.args.get("format", "html")
     if fmt == "plain":
         return httpReply(ip)
-    safe_ip = html.escape(ip or "")
     response = make_response(
         f"<html><head><title>Current IP Check</title></head>"
-        f"<body>Current IP Address: {safe_ip}</body></html>"
+        f"<body>Current IP Address: {html.escape(ip)}</body></html>"
     )
     response.mimetype = "text/html"
     return response

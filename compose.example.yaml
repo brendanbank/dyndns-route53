@@ -32,6 +32,10 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
       - "--accesslog=true"
       - "--accesslog.format=json"
+      # Dropped because RequestPath includes the query string, and this service
+      # accepts ?username=&password= auth. Remove this line only if you never
+      # use query-param auth and want paths in your access log.
+      - "--accesslog.fields.names.RequestPath=drop"
     ports:
       - "${HTTP_PORT:-80}:80/tcp"
       - "${HTTPS_PORT:-443}:443/tcp"

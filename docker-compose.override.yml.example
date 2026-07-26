@@ -35,20 +35,17 @@ services:
         # Pipeline stages for Traefik's JSON access log (--accesslog.format=json,
         # enabled in compose.yaml).
         #
-        # SECURITY: the replace stage MUST run first and is not cosmetic.
-        # Traefik's RequestPath field includes the query string, and this
-        # service accepts (though discourages) ?username=&password= auth.
-        # Without this stage those credentials are shipped to Loki in clear
-        # text and persisted -- exactly the leak gunicorn's %(U)s access-log
-        # format was chosen to avoid. Traefik has no query-stripping option.
+        # SECURITY -- do NOT try to redact credentials here. A `replace` stage
+        # matching ?password= looks correct, loads without any error, and does
+        # nothing: this driver applies pipeline stages for label extraction
+        # only and ships the original, unmodified line. Verified against a live
+        # Loki with a canary credential, which arrived in clear text.
         #
-        # This does not cover the ClientUsername field (Basic Auth username,
-        # not password). To drop the path entirely instead of redacting it,
-        # add --accesslog.fields.names.RequestPath=drop to the traefik command.
+        # Credentials are kept out of these logs at the source instead, via
+        # --accesslog.fields.names.RequestPath=drop in compose.yaml. If you
+        # re-enable RequestPath, query-param credentials WILL be persisted and
+        # indexed in Loki, and no pipeline stage here will prevent it.
         loki-pipeline-stages: |
-          - replace:
-              expression: '(?i)[?&](?:password|passwd|pass|username|user)=([^&"\s]+)'
-              replace: 'REDACTED'
           - json:
               expressions:
                 level: level

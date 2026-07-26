@@ -207,19 +207,29 @@ Gunicorn access log uses a custom format with `%(U)s` (path only) instead of `%(
 
 Traefik access logging is enabled in both compose files (`--accesslog=true --accesslog.format=json`).
 
-**Credential-leak caveat:** Traefik's `RequestPath` field includes the query string, and this service accepts (though discourages) `?username=&password=` auth. Traefik has no query-stripping option, so `compose.yaml` redacts them in a Loki `replace` pipeline stage that runs before the `json` stage. This matters more with the Loki driver than with plain stdout, because the logs are then persisted and indexed. The access log also carries a `ClientUsername` field (Basic Auth username, not password) that the redaction does not touch. An alternative to the regex is `--accesslog.filters.statuscodes=400-599`, which drops successful requests entirely.
+**Credential-leak caveat:** Traefik's `RequestPath` field includes the query string, and this service accepts (though discourages) `?username=&password=` auth. Traefik has no query-stripping option. On stdout this is contained; **any override that ships these logs off-box must include the `replace` redaction stage** from `docker-compose.override.yml.example`, or credentials are persisted and indexed in clear text. The redaction does not cover the `ClientUsername` field (Basic Auth username, not password). Alternatives: `--accesslog.fields.names.RequestPath=drop` (loses the path entirely) or `--accesslog.filters.statuscodes=400-599` (drops successful requests).
 
 There are two compose files:
 - `compose.yaml` — for development. Has `image:` + `build:` (pull uses GHCR, `--build` builds locally). Uses bind-mount for certs, staging ACME server, Loki logging.
 - `compose.example.yaml` — standalone file for end users. No `build:`, named volume for certs, production ACME server, no Loki. Linked from GitHub release notes.
 
-**Loki logging** (`compose.yaml` only) requires `LOKI_URL` in `.env` and the driver plugin installed on the host:
-```
-docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions
-```
+### Log shipping (`docker-compose.override.yml`)
+
+**No log-shipping config lives in the tracked compose files.** This is a public repo, so site-specific shipping belongs in a local `docker-compose.override.yml`, which is gitignored (`.gitignore:167`) and which Compose merges automatically. `docker-compose.override.yml.example` is the tracked template — copy it and set `LOKI_URL` in `.env`.
+
+Two things that make this easy to get wrong:
+
+- **The override REPLACES the whole option key**, it does not deep-merge into it. A partial copy silently drops whatever it omits, and `docker compose config` still renders fine. Verify what actually landed with `docker inspect -f '{{json .HostConfig.LogConfig.Config}}' <container>` — the container is the only authority.
+- **`loki-url` must be the full push endpoint** ending in `/loki/api/v1/push`. A bare base URL 404s silently and nothing is stored, with no error in `docker logs` or the daemon journal.
+
 The two services need *different* pipeline stages — do not copy one to the other:
-- `traefik` emits **JSON**, so it gets a `json` stage extracting `level`/`DownstreamStatus`/`RouterName`/`ServiceName`/`entryPointName`. High-cardinality fields (`RequestPath`, `ClientHost`) are extracted but deliberately not promoted to labels.
+- `traefik` emits **JSON**, so it gets a `json` stage extracting `level`/`DownstreamStatus`/`RouterName`/`ServiceName`/`entryPointName`, preceded by the mandatory `replace` redaction stage. High-cardinality fields (`RequestPath`, `ClientHost`) are extracted but deliberately not promoted to labels.
 - `web` emits **plain text** (`lib/log.py` uses `format='%(asctime)s %(funcName)s(%(lineno)s): %(message)s'`), so it gets only a `multiline` stage to buffer Python tracebacks. A `json` stage here would error on every line.
+
+To confirm logs are arriving, query by `compose_service`, not `container` — the driver's own labels are `compose_project`/`compose_service`/`platform`/`host`:
+```
+{compose_service="traefik"}
+```
 
 ## Testing
 

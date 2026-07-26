@@ -1,0 +1,110 @@
+# Local, site-specific Compose overrides.
+#
+# Docker Compose merges docker-compose.override.yml automatically on top of
+# compose.yaml, and it takes PRECEDENCE per option key. The real file is
+# gitignored, so anything site-specific (log shipping, alternate ports,
+# internal endpoints) belongs here rather than in the public compose.yaml.
+#
+# Usage:
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#   echo 'LOKI_URL=https://loki.example.com:3100/loki/api/v1/push' >> .env
+#   docker compose up -d
+#
+# Requires the Loki log driver plugin on the Docker host:
+#   docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions
+#
+# NOTE: loki-url must be the full PUSH endpoint, ending in /loki/api/v1/push.
+# A bare base URL silently 404s and no logs are stored. Verify with:
+#   curl -o /dev/null -w '%{http_code}\n' -XPOST -d '{}' "$LOKI_URL"
+#   -> 4xx other than 404 means the endpoint exists; 404 means wrong path.
+#
+# Because the override REPLACES the whole option key, a partial copy of this
+# file silently drops whatever it omits. If you edit the pipeline stages, keep
+# the replace stage first -- see the warning on the traefik service below.
+
+services:
+  traefik:
+    logging:
+      driver: "loki"
+      options:
+        max-size: "500m"
+        max-file: "1"
+        loki-external-labels: "platform=docker,app=dyndns"
+        loki-url: "${LOKI_URL}"
+
+        # Pipeline stages for Traefik's JSON access log (--accesslog.format=json,
+        # enabled in compose.yaml).
+        #
+        # SECURITY: the replace stage MUST run first and is not cosmetic.
+        # Traefik's RequestPath field includes the query string, and this
+        # service accepts (though discourages) ?username=&password= auth.
+        # Without this stage those credentials are shipped to Loki in clear
+        # text and persisted -- exactly the leak gunicorn's %(U)s access-log
+        # format was chosen to avoid. Traefik has no query-stripping option.
+        #
+        # This does not cover the ClientUsername field (Basic Auth username,
+        # not password). To drop the path entirely instead of redacting it,
+        # add --accesslog.fields.names.RequestPath=drop to the traefik command.
+        loki-pipeline-stages: |
+          - replace:
+              expression: '(?i)[?&](?:password|passwd|pass|username|user)=([^&"\s]+)'
+              replace: 'REDACTED'
+          - json:
+              expressions:
+                level: level
+                status: DownstreamStatus
+                router: RouterName
+                service: ServiceName
+                entrypoint: entryPointName
+          - labels:
+              level:
+              status:
+              router:
+              entrypoint:
+
+        # Only low-cardinality fields are promoted to labels above. RequestPath
+        # and ClientHost stay in the log line on purpose -- as labels they would
+        # create a new Loki stream per unique value.
+        loki-relabel-config: |
+          - action: replace
+            source_labels: ['host']
+            target_label: 'host'
+          - action: replace
+            source_labels: ['container_name']
+            target_label: 'container'
+          - action: replace
+            source_labels: ['stream']
+            target_label: 'stream'
+
+  web:
+    logging:
+      driver: "loki"
+      options:
+        max-size: "500m"
+        max-file: "1"
+        loki-external-labels: "platform=docker,app=dyndns"
+        loki-url: "${LOKI_URL}"
+
+        # This service logs PLAIN TEXT, not JSON (see lib/log.py, which sets
+        # format='%(asctime)s %(funcName)s(%(lineno)s): %(message)s'). Do NOT
+        # copy the traefik json stage here -- it would error on every line.
+        # The multiline stage buffers Python tracebacks into single entries.
+        #
+        # No redaction stage is needed: gunicorn's access log uses %(U)s (path
+        # only), so query strings never reach these logs.
+        loki-pipeline-stages: |
+          - multiline:
+              firstline: '^Traceback \(most recent call last\):'
+              max_wait_time: 3s
+              max_lines: 128
+
+        loki-relabel-config: |
+          - action: replace
+            source_labels: ['host']
+            target_label: 'host'
+          - action: replace
+            source_labels: ['container_name']
+            target_label: 'container'
+          - action: replace
+            source_labels: ['stream']
+            target_label: 'stream'

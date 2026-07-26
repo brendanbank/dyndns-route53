@@ -291,7 +291,6 @@ def updateDydns():
         if username or password:
             log.warning('credentials passed via query parameters - use HTTP Basic Auth instead')
 
-    url = re.sub(r"password=[^\&]*", "password=********", request.url)
     ip = request.remote_addr
 
     if not myip:
@@ -314,7 +313,8 @@ def updateDydns():
     if updatetype:
         log.warning(f'updatetype parameter is deprecated and ignored (was: {updatetype})')
 
-    log.info(f'received request from {ip} to host: {request.host}  url: {url}')
+    # No URL/path logging here -- request paths are logged by Traefik only.
+    log.info(f'received request from {ip} to host: {request.host}')
 
     if not myip or not hostnames:
         log.critical(f'invalid IP address {myip} or hostnames {hostnames}')
@@ -432,7 +432,6 @@ def deleteDyndns():
         if username or password:
             log.warning('credentials passed via query parameters - use HTTP Basic Auth instead')
 
-    url = re.sub(r"password=[^\&]*", "password=********", request.url)
     ip = request.remote_addr
 
     # Authenticate against database
@@ -448,7 +447,8 @@ def deleteDyndns():
         return httpReply("abuse")
     rate_limiter.record_request(user.id)
 
-    log.info(f'received delete request from {ip} to host: {request.host}  url: {url}')
+    # No URL/path logging here -- request paths are logged by Traefik only.
+    log.info(f'received delete request from {ip} to host: {request.host}')
 
     if not hostnames:
         log.critical('missing hostname parameter')

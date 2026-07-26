@@ -24,4 +24,7 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:80/health')"
 
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["gunicorn", "--bind", "0.0.0.0:80", "--workers", "2", "--timeout", "30", "--preload", "--access-logfile", "-", "--access-logformat", "%(h)s %(l)s %(u)s %(t)s \"%(m)s %(U)s %(H)s\" %(s)s %(b)s", "dyndns:create_app()"]
+# Gunicorn's access log is disabled on purpose: request paths are logged by
+# Traefik only, so there is exactly one place where a URL can appear (and one
+# place to redact). Gunicorn's error log is unaffected and still goes to stderr.
+CMD ["gunicorn", "--bind", "0.0.0.0:80", "--workers", "2", "--timeout", "30", "--preload", "dyndns:create_app()"]

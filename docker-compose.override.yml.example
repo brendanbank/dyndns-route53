@@ -29,23 +29,37 @@ services:
       options:
         max-size: "500m"
         max-file: "1"
-        loki-external-labels: "platform=docker,app=dyndns"
+        # container={{.Name}} is required, not decorative. The driver applies
+        # its container_name={{.Name}} default ONLY when loki-external-labels
+        # is unset, so setting this option at all silently drops it.
+        loki-external-labels: "platform=docker,app=dyndns,container={{.Name}}"
         loki-url: "${LOKI_URL}"
 
         # Pipeline stages for Traefik's JSON access log (--accesslog.format=json,
         # enabled in compose.yaml).
         #
-        # SECURITY -- do NOT try to redact credentials here. A `replace` stage
-        # matching ?password= looks correct, loads without any error, and does
-        # nothing: this driver applies pipeline stages for label extraction
-        # only and ships the original, unmodified line. Verified against a live
-        # Loki with a canary credential, which arrived in clear text.
+        # SECURITY: the replace stage is mandatory. Traefik's RequestPath
+        # includes the query string and this service accepts ?username=&password=
+        # auth, so without it credentials are shipped to Loki in clear text and
+        # persisted. Traefik has no query-stripping option.
         #
-        # Credentials are kept out of these logs at the source instead, via
-        # --accesslog.fields.names.RequestPath=drop in compose.yaml. If you
-        # re-enable RequestPath, query-param credentials WILL be persisted and
-        # indexed in Loki, and no pipeline stage here will prevent it.
+        # ALWAYS canary-test after touching these stages -- a stage that is
+        # present in `docker inspect` is not proof that it fired, and nothing is
+        # logged when it silently does not:
+        #   curl "https://<host>/nic/update?hostname=x&password=CANARYVALUE"
+        #   {container="<traefik-container>"} |= `CANARYVALUE`     # must be empty
+        # If it leaks, drop the field at the producer instead by adding
+        # --accesslog.fields.names.RequestPath=drop to the traefik command.
+        #
+        # Beware shell escaping when testing this expression from a script:
+        # \\s instead of \s yields a class excluding literal backslash and the
+        # letter s, which (with (?i)) silently mangles canaries and fakes a pass.
+        #
+        # Does not cover ClientUsername (Basic Auth username, not password).
         loki-pipeline-stages: |
+          - replace:
+              expression: '(?i)[?&](?:password|passwd|pass|username|user)=([^&"\s]+)'
+              replace: 'REDACTED'
           - json:
               expressions:
                 level: level
@@ -62,16 +76,14 @@ services:
         # Only low-cardinality fields are promoted to labels above. RequestPath
         # and ClientHost stay in the log line on purpose -- as labels they would
         # create a new Loki stream per unique value.
-        loki-relabel-config: |
-          - action: replace
-            source_labels: ['host']
-            target_label: 'host'
-          - action: replace
-            source_labels: ['container_name']
-            target_label: 'container'
-          - action: replace
-            source_labels: ['stream']
-            target_label: 'stream'
+        #
+        # There is deliberately no loki-relabel-config here. Every rule that
+        # used to live in one was a no-op, verified against a live Loki:
+        #   host -> host             identity copy of a label the driver emits
+        #   container_name -> container   source label never exists (see above)
+        #   stream -> stream         the driver's label is called `source`
+        #   __filename__ -> job      promtail-internal; driver passes `filename`
+        # Query with source="stdout"|"stderr" where you would have used stream.
 
   web:
     logging:
@@ -79,7 +91,10 @@ services:
       options:
         max-size: "500m"
         max-file: "1"
-        loki-external-labels: "platform=docker,app=dyndns"
+        # container={{.Name}} is required, not decorative. The driver applies
+        # its container_name={{.Name}} default ONLY when loki-external-labels
+        # is unset, so setting this option at all silently drops it.
+        loki-external-labels: "platform=docker,app=dyndns,container={{.Name}}"
         loki-url: "${LOKI_URL}"
 
         # This service logs PLAIN TEXT, not JSON (see lib/log.py, which sets
@@ -87,21 +102,12 @@ services:
         # copy the traefik json stage here -- it would error on every line.
         # The multiline stage buffers Python tracebacks into single entries.
         #
-        # No redaction stage is needed: gunicorn's access log uses %(U)s (path
-        # only), so query strings never reach these logs.
+        # No redaction stage is needed: gunicorn's access log is disabled
+        # entirely (see Dockerfile) and the app logs no URLs, so request paths
+        # never reach these logs. Traefik is the only place a path is logged.
         loki-pipeline-stages: |
           - multiline:
               firstline: '^Traceback \(most recent call last\):'
               max_wait_time: 3s
               max_lines: 128
 
-        loki-relabel-config: |
-          - action: replace
-            source_labels: ['host']
-            target_label: 'host'
-          - action: replace
-            source_labels: ['container_name']
-            target_label: 'container'
-          - action: replace
-            source_labels: ['stream']
-            target_label: 'stream'

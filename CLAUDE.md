@@ -207,9 +207,9 @@ Gunicorn access log uses a custom format with `%(U)s` (path only) instead of `%(
 
 Traefik access logging is enabled in both compose files (`--accesslog=true --accesslog.format=json`).
 
-**Credential-leak caveat:** Traefik's `RequestPath` field includes the query string, and this service accepts (though discourages) `?username=&password=` auth. Traefik has no query-stripping option. `compose.yaml` keeps `RequestPath`; redaction is the shipping pipeline's job (`replace` stage in `docker-compose.override.yml.example`). `compose.example.yaml` drops the field instead, since end users have no redaction layer. `ClientUsername` — the Basic Auth username, not the password — is logged either way.
+**Credential-leak caveat:** Traefik's `RequestPath` field includes the query string, and this service accepts (though discourages) `?username=&password=` auth. Traefik has no query-stripping option, so the field is dropped entirely via `--accesslog.fields.names.RequestPath=drop`. Everything else is retained (status, router, service, method, duration, `ClientHost`); `ClientUsername` — the Basic Auth username, not the password — is still logged.
 
-**Always verify redaction with a canary; a configured stage is not proof it fired.** Send `?password=CANARYVALUE` through the service, then confirm it is absent from Loki via `{compose_service="traefik"} |= \`CANARYVALUE\``. A `replace` stage that is present in `docker inspect` can still be ineffective, and nothing is logged when that happens. If a canary leaks, fall back to `--accesslog.fields.names.RequestPath=drop` at the producer.
+**Do not attempt to redact this downstream.** A Loki `replace` pipeline stage matching `?password=` loads without error and has no effect: the docker log driver applies pipeline stages for label extraction only and ships the original, unmodified line. This was verified against a live Loki with a canary credential, which arrived in clear text. Redaction must happen at the producer.
 
 There are two compose files:
 - `compose.yaml` — for development. Has `image:` + `build:` (pull uses GHCR, `--build` builds locally). Uses bind-mount for certs, staging ACME server, Loki logging.

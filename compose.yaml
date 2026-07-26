@@ -11,7 +11,8 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
       - "--certificatesresolvers.letsencrypt.acme.caserver=${LETSENCRYPT_CASERVER:-https://acme-staging-v02.api.letsencrypt.org/directory}"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
-      - "--accesslog=false"
+      - "--accesslog=true"
+      - "--accesslog.format=json"
     ports:
       - "${HTTP_PORT:-80}:80/tcp"
       - "${HTTPS_PORT:-443}:443/tcp"
@@ -21,6 +22,53 @@ services:
     restart: always
     networks:
       - web-network
+    logging:
+      driver: "loki"
+      options:
+        max-size: "500m"
+        max-file: "1"
+        loki-external-labels: "platform=docker,app=dyndns"
+        loki-url: "${LOKI_URL}"
+
+        # Pipeline stages for Traefik's JSON access log (--accesslog.format=json).
+        #
+        # The replace stage runs FIRST and is a security control, not cosmetic:
+        # Traefik's RequestPath field includes the query string, and this service
+        # supports (though discourages) ?username=&password= query-param auth.
+        # Without redaction those credentials are shipped to Loki in clear text
+        # and persisted. This is exactly the leak gunicorn's %(U)s log format
+        # was chosen to avoid -- Traefik has no built-in query-stripping option.
+        loki-pipeline-stages: |
+          - replace:
+              expression: '(?i)[?&](?:password|passwd|pass|username|user)=([^&"\s]+)'
+              replace: 'REDACTED'
+          - json:
+              expressions:
+                level: level
+                status: DownstreamStatus
+                router: RouterName
+                service: ServiceName
+                entrypoint: entryPointName
+          - labels:
+              level:
+              status:
+              router:
+              entrypoint:
+
+        # Relabel config to expose useful labels in Loki.
+        # - host: identifies which Docker host produced the logs
+        # - container: the container name
+        # - stream: stdout or stderr
+        loki-relabel-config: |
+          - action: replace
+            source_labels: ['host']
+            target_label: 'host'
+          - action: replace
+            source_labels: ['container_name']
+            target_label: 'container'
+          - action: replace
+            source_labels: ['stream']
+            target_label: 'stream'
 
   web:
     image: ghcr.io/brendanbank/dyndns-route53:latest
@@ -59,6 +107,37 @@ services:
     networks:
       - web-network
     restart: always
+    logging:
+      driver: "loki"
+      options:
+        max-size: "500m"
+        max-file: "1"
+        loki-external-labels: "platform=docker,app=dyndns"
+        loki-url: "${LOKI_URL}"
+
+        # This service logs PLAIN TEXT, not JSON (see lib/log.py), so there is
+        # no json stage here -- it would error on every line. The multiline
+        # stage buffers Python tracebacks into single entries.
+        loki-pipeline-stages: |
+          - multiline:
+              firstline: '^Traceback \(most recent call last\):'
+              max_wait_time: 3s
+              max_lines: 128
+
+        # Relabel config to expose useful labels in Loki.
+        # - host: identifies which Docker host produced the logs
+        # - container: the container name
+        # - stream: stdout or stderr
+        loki-relabel-config: |
+          - action: replace
+            source_labels: ['host']
+            target_label: 'host'
+          - action: replace
+            source_labels: ['container_name']
+            target_label: 'container'
+          - action: replace
+            source_labels: ['stream']
+            target_label: 'stream'
 
 networks:
   web-network:

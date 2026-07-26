@@ -185,15 +185,41 @@ Docker Compose runs Traefik (TLS via Let's Encrypt HTTP-01 challenge) in front o
 
 The `instance/` directory (SQLite databases) is persisted via a Docker named volume (`dyndns-data:/app/instance`). Use `scripts/backup.sh` to back up and restore these databases safely (WAL-mode safe, works while the app is running).
 
-Traefik and the web container share a `web-network` bridge network. To preserve real client IPs, the Docker daemon must have `"userland-proxy": false` in `/etc/docker/daemon.json` (Docker's default userland-proxy rewrites source IPs to the bridge gateway). With this setting, iptables NAT preserves source IPs and Traefik correctly populates `X-Forwarded-For`. Port mapping uses `${HTTP_PORT:-80}:80` and `${HTTPS_PORT:-443}:443`.
+Traefik and the web container share a `web-network` bridge network. Port mapping uses `${HTTP_PORT:-80}:80` and `${HTTPS_PORT:-443}:443`.
+
+The Docker daemon should have `"userland-proxy": false` in `/etc/docker/daemon.json`. This is a **hardening measure** (CIS Docker Benchmark: smaller attack surface, no per-connection helper process, lower overhead) — it is *not* required for correct client IPs. Changing it requires a `dockerd` restart, which bounces every container on the host.
+
+Client-IP behavior, precisely: with `userland-proxy` at its default (`true`), Docker installs both iptables DNAT rules *and* the `docker-proxy` helper. External traffic takes the DNAT path and **the source IP is preserved**; `docker-proxy` only handles what iptables cannot — connections originating on the Docker host itself, and hairpin NAT. Only those get rewritten to the bridge gateway. So external clients log correctly either way, but a DynDNS client or health probe running *on the Docker host* will show a `172.x` address in events and access logs.
+
+To verify empirically rather than inferring from config, hit the unauthenticated endpoint from an external machine and compare:
+```
+curl -4 -s "https://${TRAEFIK_HOSTNAME}/nic/checkip?format=plain"   # should equal your real public IP
+```
+To check whether the setting is actually in effect (`docker info` does not report it):
+```
+ps -eo args | grep '[d]ocker-proxy'   # processes present => userland-proxy is ON
+dockerd --validate --config-file /etc/docker/daemon.json   # syntax-check before restarting
+```
 
 The container is hardened: runs as a non-root `app` user (uid 100) via an entrypoint script (`entrypoint.sh`) that fixes volume ownership with `chown` then drops privileges with `setpriv`. The root filesystem is read-only (`/tmp` mounted as tmpfs), all Linux capabilities are dropped except `CHOWN`/`SETUID`/`SETGID` (needed by the entrypoint only, dropped after privilege de-escalation), and `no-new-privileges` prevents setuid-based escalation. A health check polls `http://localhost:80/` every 30 seconds.
 
 Gunicorn access log uses a custom format with `%(U)s` (path only) instead of `%(r)s` (full request line) to prevent passwords in query parameters from appearing in logs.
 
+Traefik access logging is enabled in both compose files (`--accesslog=true --accesslog.format=json`).
+
+**Credential-leak caveat:** Traefik's `RequestPath` field includes the query string, and this service accepts (though discourages) `?username=&password=` auth. Traefik has no query-stripping option, so `compose.yaml` redacts them in a Loki `replace` pipeline stage that runs before the `json` stage. This matters more with the Loki driver than with plain stdout, because the logs are then persisted and indexed. The access log also carries a `ClientUsername` field (Basic Auth username, not password) that the redaction does not touch. An alternative to the regex is `--accesslog.filters.statuscodes=400-599`, which drops successful requests entirely.
+
 There are two compose files:
 - `compose.yaml` — for development. Has `image:` + `build:` (pull uses GHCR, `--build` builds locally). Uses bind-mount for certs, staging ACME server, Loki logging.
 - `compose.example.yaml` — standalone file for end users. No `build:`, named volume for certs, production ACME server, no Loki. Linked from GitHub release notes.
+
+**Loki logging** (`compose.yaml` only) requires `LOKI_URL` in `.env` and the driver plugin installed on the host:
+```
+docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions
+```
+The two services need *different* pipeline stages — do not copy one to the other:
+- `traefik` emits **JSON**, so it gets a `json` stage extracting `level`/`DownstreamStatus`/`RouterName`/`ServiceName`/`entryPointName`. High-cardinality fields (`RequestPath`, `ClientHost`) are extracted but deliberately not promoted to labels.
+- `web` emits **plain text** (`lib/log.py` uses `format='%(asctime)s %(funcName)s(%(lineno)s): %(message)s'`), so it gets only a `multiline` stage to buffer Python tracebacks. A `json` stage here would error on every line.
 
 ## Testing
 
@@ -258,5 +284,6 @@ Expected delete response: `good` (record deleted) or `nochg` (record didn't exis
 - GHCR package visibility is independent of repo visibility
 - Query parameter authentication is supported but logs a warning — prefer HTTP Basic Auth
 - Gunicorn access log excludes query strings to prevent password leakage
+- Traefik's JSON access log *does* include the query string (`RequestPath`); `compose.yaml` redacts credential params in a Loki `replace` pipeline stage. Prefer HTTP Basic Auth over query-param auth.
 - CSRF protection enabled for all web forms; `/nic/update` and `/nic/delete` are exempt (use Basic Auth)
 - Container runs as non-root user with read-only filesystem, dropped capabilities, and no-new-privileges

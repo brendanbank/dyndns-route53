@@ -14,12 +14,16 @@ services:
       - "--accesslog=true"
       - "--accesslog.format=json"
       # Traefik is the ONLY place a request path is logged: gunicorn's access
-      # log is disabled and the app logs no URLs. RequestPath includes the query
-      # string, and this service accepts ?username=&password= auth, so any
-      # pipeline shipping these logs off-box MUST redact -- see the replace
-      # stage in docker-compose.override.yml.example, and canary-test it.
-      # To opt out of path logging entirely instead, add:
-      #   --accesslog.fields.names.RequestPath=drop
+      # log is disabled and the app logs no URLs.
+      #
+      # RequestPath is currently DROPPED because it includes the query string
+      # and this service accepts ?username=&password= auth. A Loki `replace`
+      # stage redacts correctly in every isolated test of this exact config,
+      # but does NOT redact on the live long-running traefik container -- a
+      # canary password still arrived in clear text. Cause unresolved, so the
+      # field stays dropped until redaction can be demonstrated end to end.
+      # Retained: status, router, service, method, duration, ClientHost.
+      - "--accesslog.fields.names.RequestPath=drop"
     ports:
       - "${HTTP_PORT:-80}:80/tcp"
       - "${HTTPS_PORT:-443}:443/tcp"

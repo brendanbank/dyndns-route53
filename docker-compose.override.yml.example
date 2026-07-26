@@ -35,17 +35,25 @@ services:
         # Pipeline stages for Traefik's JSON access log (--accesslog.format=json,
         # enabled in compose.yaml).
         #
-        # SECURITY -- do NOT try to redact credentials here. A `replace` stage
-        # matching ?password= looks correct, loads without any error, and does
-        # nothing: this driver applies pipeline stages for label extraction
-        # only and ships the original, unmodified line. Verified against a live
-        # Loki with a canary credential, which arrived in clear text.
+        # SECURITY: the replace stage is mandatory, not cosmetic. Traefik's
+        # RequestPath includes the query string and this service accepts
+        # ?username=&password= auth, so without it credentials are shipped to
+        # Loki in clear text and persisted -- the leak gunicorn's %(U)s access
+        # log format was chosen to avoid. Traefik has no query-stripping option.
         #
-        # Credentials are kept out of these logs at the source instead, via
-        # --accesslog.fields.names.RequestPath=drop in compose.yaml. If you
-        # re-enable RequestPath, query-param credentials WILL be persisted and
-        # indexed in Loki, and no pipeline stage here will prevent it.
+        # Verify it after any change to these stages -- a stage that is present
+        # is not proof that it fired. Send a request with a throwaway value:
+        #   curl "https://<host>/nic/update?hostname=x&password=CANARYVALUE"
+        # then confirm CANARYVALUE does NOT appear in Loki:
+        #   {compose_service="traefik"} |= `CANARYVALUE`
+        # If it does, drop the field at the source instead by adding
+        # --accesslog.fields.names.RequestPath=drop to the traefik command.
+        #
+        # Does not cover ClientUsername (Basic Auth username, not password).
         loki-pipeline-stages: |
+          - replace:
+              expression: '(?i)[?&](?:password|passwd|pass|username|user)=([^&"\s]+)'
+              replace: 'REDACTED'
           - json:
               expressions:
                 level: level

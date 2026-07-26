@@ -13,15 +13,13 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
       - "--accesslog=true"
       - "--accesslog.format=json"
-      # RequestPath contains the query string, and this service accepts
-      # ?username=&password= auth, so the path is dropped rather than logged.
-      # Redacting it downstream (e.g. a Loki `replace` pipeline stage) does NOT
-      # work: the docker log driver applies pipeline stages for label
-      # extraction only and ships the original, unmodified line. Verified
-      # against a live Loki -- the stage loads without error and has no effect.
-      # Everything else is retained: status, router, service, method, duration,
-      # ClientHost. Note ClientUsername (Basic Auth username) is still logged.
-      - "--accesslog.fields.names.RequestPath=drop"
+      # RequestPath is retained (it includes the query string). Because this
+      # service accepts ?username=&password= auth, ANY pipeline that ships
+      # these logs off-box MUST redact them -- see the replace stage in
+      # docker-compose.override.yml.example. Without a shipping pipeline the
+      # exposure is limited to local `docker logs`.
+      # To opt out entirely instead, add:
+      #   --accesslog.fields.names.RequestPath=drop
     ports:
       - "${HTTP_PORT:-80}:80/tcp"
       - "${HTTPS_PORT:-443}:443/tcp"

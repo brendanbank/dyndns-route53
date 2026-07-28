@@ -38,7 +38,7 @@ services:
       # Keep the path and the query parameter names, but redact every value, so
       # ?password= auth can never land in the log. Requires Traefik >= 3.6.
       # Use =drop instead to remove the query string entirely.
-      - "--accesslog.fields.queryparameters.defaultmode=redact"
+      - "--accesslog.fields.queryparameters.defaultmode=drop"
       # Request headers default to drop, so User-Agent must be kept by name.
       - "--accesslog.fields.headers.names.User-Agent=keep"
     ports:

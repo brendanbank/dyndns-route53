@@ -30,7 +30,7 @@ services:
       # as of 3.7.9; both 3.6.24 and 3.7.9 reject it as "field not found", and
       # v3.7.9's flag list has per-name maps for headers and fields but not for
       # query parameters.
-      - "--accesslog.fields.queryparameters.defaultmode=redact"
+      - "--accesslog.fields.queryparameters.defaultmode=drop"
       # Request headers default to drop, so User-Agent must be kept by name.
       # Needed by the synthetic-monitoring exclusion in the anomalies pipeline:
       # a rule filtering on a field the edge never logs does not error, it just

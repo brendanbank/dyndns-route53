@@ -16,14 +16,15 @@ services:
       # Traefik is the ONLY place a request path is logged: gunicorn's access
       # log is disabled and the app logs no URLs.
       #
-      # The path is kept and every query parameter VALUE is redacted at the
+      # The path is kept and the whole query string is stripped at the
       # producer -- this service accepts ?username=&password= auth, so no query
-      # value may reach the log. `redact` rather than `drop` so the parameter
-      # names survive (which of hostname/myip/password a client sent is useful
-      # signal; the values are not). Solved in Traefik itself rather than
-      # downstream: a Loki `replace` stage redacted correctly in every isolated
-      # test yet still leaked a canary on the live container, so pipeline
-      # redaction is not relied on as a security control.
+      # value may reach the log. RequestPath logs as e.g. "/nic/update".
+      #
+      # Use ONLY keep or drop. `redact` is accepted by the flag parser and
+      # Traefik starts cleanly, but it behaves as keep: a canary request logged
+      # the full query string including the password in clear text. PR #13091
+      # implemented keep/drop only; an invalid mode is silently ignored rather
+      # than rejected, so it looks configured and protects nothing.
       #
       # Requires Traefik >= 3.6 (PR #13091). This mode is GLOBAL -- per-parameter
       # filtering (queryparameters.names.<param>) does NOT exist in any release
@@ -48,9 +49,8 @@ services:
     # Log shipping (Loki etc.) is deliberately NOT configured here -- it is
     # site-specific and this is a public repo. Put it in a local, gitignored
     # docker-compose.override.yml; see docker-compose.override.yml.example.
-    # IMPORTANT: because --accesslog is enabled above, any override that ships
-    # these logs off-box MUST include the credential redaction stage from that
-    # example file. Traefik's RequestPath includes the query string.
+    # Credentials cannot reach these logs -- the query string is stripped above
+    # at the producer -- so no downstream redaction stage is needed or trusted.
 
   web:
     image: ghcr.io/brendanbank/dyndns-route53:latest

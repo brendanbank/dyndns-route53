@@ -210,10 +210,12 @@ Traefik access logging is enabled in both compose files (`--accesslog=true --acc
 **Credential-leak handling:** Traefik's `RequestPath` includes the query string by default, and this service accepts (though discourages) `?username=&password=` auth. This is solved **at the producer**:
 
 ```
---accesslog.fields.queryparameters.defaultmode=redact
+--accesslog.fields.queryparameters.defaultmode=drop
 ```
 
-The path is kept (`/nic/update`) and every query parameter **value** is replaced before anything is written, while the parameter names survive. Use `=drop` instead to remove the query string entirely. Requires **Traefik >= 3.6** ([PR #13091](https://github.com/traefik/traefik/pull/13091)). Per-parameter filtering (`queryparameters.names.<param>`) does **not** exist in any release as of 3.7.9 — verified by flag probe against both 3.6.24 and 3.7.9, which reject it as `field not found`. [PR #11140](https://github.com/traefik/traefik/pull/11140), which proposed it plus a separate `RequestQuery` field, was closed unmerged. `ClientUsername` (Basic Auth username, not password) is still logged.
+The path is kept (`/nic/update`), the whole query string is stripped before anything is written.
+
+**Only `keep` and `drop` are real modes.** `redact` is accepted by the flag parser and Traefik starts cleanly, but it behaves as `keep` — a canary request logged the full query string including the password in clear text. PR #13091 implemented keep/drop only, and an invalid mode is silently ignored rather than rejected. Requires **Traefik >= 3.6** ([PR #13091](https://github.com/traefik/traefik/pull/13091)). Per-parameter filtering (`queryparameters.names.<param>`) does **not** exist in any release as of 3.7.9 — verified by flag probe against both 3.6.24 and 3.7.9, which reject it as `field not found`. [PR #11140](https://github.com/traefik/traefik/pull/11140), which proposed it plus a separate `RequestQuery` field, was closed unmerged. `ClientUsername` (Basic Auth username, not password) is still logged.
 
 **Do not rely on downstream redaction for this.** A Loki `replace` pipeline stage redacts correctly in every isolated test of the exact prod config, yet still leaked a canary password on the live long-running traefik container — cause never identified. Producer-side stripping has no such failure mode.
 

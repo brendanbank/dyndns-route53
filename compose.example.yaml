@@ -32,12 +32,9 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
       - "--accesslog=true"
       - "--accesslog.format=json"
-      # Dropped because RequestPath includes the query string, and this service
-      # accepts ?username=&password= auth. Remove this line only if you never
-      # use query-param auth and want paths in your access log.
-      # Keep the path and the query parameter names, but redact every value, so
-      # ?password= auth can never land in the log. Requires Traefik >= 3.6.
-      # Use =drop instead to remove the query string entirely.
+      # Keep the path but strip the query string, so ?password= auth can never
+      # land in the log. Requires Traefik >= 3.6. Use only keep or drop --
+      # `redact` is accepted but silently behaves as keep.
       - "--accesslog.fields.queryparameters.defaultmode=drop"
       # Request headers default to drop, so User-Agent must be kept by name.
       - "--accesslog.fields.headers.names.User-Agent=keep"

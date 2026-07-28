@@ -19,8 +19,7 @@
 #   -> 4xx other than 404 means the endpoint exists; 404 means wrong path.
 #
 # Because the override REPLACES the whole option key, a partial copy of this
-# file silently drops whatever it omits. If you edit the pipeline stages, keep
-# the replace stage first -- see the warning on the traefik service below.
+# file silently drops whatever it omits.
 
 services:
   traefik:
@@ -38,28 +37,16 @@ services:
         # Pipeline stages for Traefik's JSON access log (--accesslog.format=json,
         # enabled in compose.yaml).
         #
-        # SECURITY: the replace stage is mandatory. Traefik's RequestPath
-        # includes the query string and this service accepts ?username=&password=
-        # auth, so without it credentials are shipped to Loki in clear text and
-        # persisted. Traefik has no query-stripping option.
+        # Credentials cannot reach these logs: Traefik strips all query
+        # parameters at the producer via
+        # --accesslog.fields.queryparameters.defaultmode=drop (see compose.yaml).
         #
-        # ALWAYS canary-test after touching these stages -- a stage that is
-        # present in `docker inspect` is not proof that it fired, and nothing is
-        # logged when it silently does not:
-        #   curl "https://<host>/nic/update?hostname=x&password=CANARYVALUE"
-        #   {container="<traefik-container>"} |= `CANARYVALUE`     # must be empty
-        # If it leaks, drop the field at the producer instead by adding
-        # --accesslog.fields.names.RequestPath=drop to the traefik command.
-        #
-        # Beware shell escaping when testing this expression from a script:
-        # \\s instead of \s yields a class excluding literal backslash and the
-        # letter s, which (with (?i)) silently mangles canaries and fakes a pass.
-        #
-        # Does not cover ClientUsername (Basic Auth username, not password).
+        # There is deliberately NO `replace` redaction stage here. One was tried
+        # and is not trustworthy: it redacts correctly in every isolated test of
+        # this exact config, yet still leaked a canary password on the live
+        # long-running traefik container, with no error logged anywhere. Do not
+        # reintroduce it as a security control.
         loki-pipeline-stages: |
-          - replace:
-              expression: '(?i)[?&](?:password|passwd|pass|username|user)=([^&"\s]+)'
-              replace: 'REDACTED'
           - json:
               expressions:
                 level: level

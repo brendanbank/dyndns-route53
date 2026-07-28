@@ -16,14 +16,17 @@ services:
       # Traefik is the ONLY place a request path is logged: gunicorn's access
       # log is disabled and the app logs no URLs.
       #
-      # RequestPath is currently DROPPED because it includes the query string
-      # and this service accepts ?username=&password= auth. A Loki `replace`
-      # stage redacts correctly in every isolated test of this exact config,
-      # but does NOT redact on the live long-running traefik container -- a
-      # canary password still arrived in clear text. Cause unresolved, so the
-      # field stays dropped until redaction can be demonstrated end to end.
-      # Retained: status, router, service, method, duration, ClientHost.
-      - "--accesslog.fields.names.RequestPath=drop"
+      # The path is kept, but ALL query parameters are stripped from it at the
+      # producer -- this service accepts ?username=&password= auth, so the query
+      # string must never reach the log. Solved in Traefik itself rather than
+      # downstream: a Loki `replace` stage redacted correctly in every isolated
+      # test yet still leaked a canary on the live container, so redaction is
+      # not relied on. RequestPath now logs as e.g. "/nic/update".
+      #
+      # Requires Traefik >= 3.6 (PR #13091). Per-parameter filtering
+      # (queryparameters.names.<param>) does NOT exist in any release as of
+      # 3.7.9 -- verified by flag probe; only this global mode is available.
+      - "--accesslog.fields.queryparameters.defaultmode=drop"
       # Request headers default to drop, so User-Agent must be kept by name.
       # Needed by the synthetic-monitoring exclusion in the anomalies pipeline:
       # a rule filtering on a field the edge never logs does not error, it just

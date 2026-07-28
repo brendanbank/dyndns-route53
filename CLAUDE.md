@@ -207,9 +207,17 @@ Gunicorn access log uses a custom format with `%(U)s` (path only) instead of `%(
 
 Traefik access logging is enabled in both compose files (`--accesslog=true --accesslog.format=json`).
 
-**Credential-leak caveat:** Traefik's `RequestPath` field includes the query string, and this service accepts (though discourages) `?username=&password=` auth. Traefik has no query-stripping option, so the field is dropped entirely via `--accesslog.fields.names.RequestPath=drop`. Everything else is retained (status, router, service, method, duration, `ClientHost`); `ClientUsername` — the Basic Auth username, not the password — is still logged.
+**Credential-leak handling:** Traefik's `RequestPath` includes the query string by default, and this service accepts (though discourages) `?username=&password=` auth. This is solved **at the producer**:
 
-**Do not attempt to redact this downstream.** A Loki `replace` pipeline stage matching `?password=` loads without error and has no effect: the docker log driver applies pipeline stages for label extraction only and ships the original, unmodified line. This was verified against a live Loki with a canary credential, which arrived in clear text. Redaction must happen at the producer.
+```
+--accesslog.fields.queryparameters.defaultmode=drop
+```
+
+The path is kept (`/nic/update`), the whole query string is stripped before anything is written. Requires **Traefik >= 3.6** ([PR #13091](https://github.com/traefik/traefik/pull/13091)). Per-parameter filtering (`queryparameters.names.<param>`) does **not** exist in any release as of 3.7.9 — verified by flag probe against both 3.6.24 and 3.7.9, which reject it as `field not found`. [PR #11140](https://github.com/traefik/traefik/pull/11140), which proposed it plus a separate `RequestQuery` field, was closed unmerged. `ClientUsername` (Basic Auth username, not password) is still logged.
+
+**Do not rely on downstream redaction for this.** A Loki `replace` pipeline stage redacts correctly in every isolated test of the exact prod config, yet still leaked a canary password on the live long-running traefik container — cause never identified. Producer-side stripping has no such failure mode.
+
+**Verify with a canary after any change here.** Send `?password=CANARYVALUE` through the service, then confirm it is absent: ``{app="dyndns",container="dyndns-route53-traefik-1"} |= `CANARYVALUE` ``. A flag or stage being present in `docker inspect` is not proof it took effect, and nothing is logged when it silently does not.
 
 There are two compose files:
 - `compose.yaml` — for development. Has `image:` + `build:` (pull uses GHCR, `--build` builds locally). Uses bind-mount for certs, staging ACME server, Loki logging.
@@ -225,7 +233,7 @@ Two things that make this easy to get wrong:
 - **`loki-url` must be the full push endpoint** ending in `/loki/api/v1/push`. A bare base URL 404s silently and nothing is stored, with no error in `docker logs` or the daemon journal.
 
 The two services need *different* pipeline stages — do not copy one to the other:
-- `traefik` emits **JSON**, so it gets a `json` stage extracting `level`/`DownstreamStatus`/`RouterName`/`ServiceName`/`entryPointName`, preceded by the mandatory `replace` redaction stage. High-cardinality fields (`RequestPath`, `ClientHost`) are extracted but deliberately not promoted to labels.
+- `traefik` emits **JSON**, so it gets a `json` stage extracting `level`/`DownstreamStatus`/`RouterName`/`ServiceName`/`entryPointName`, High-cardinality fields (`RequestPath`, `ClientHost`) are extracted but deliberately not promoted to labels.
 - `web` emits **plain text** (`lib/log.py` uses `format='%(asctime)s %(funcName)s(%(lineno)s): %(message)s'`), so it gets only a `multiline` stage to buffer Python tracebacks. A `json` stage here would error on every line.
 
 To confirm logs are arriving, query by `compose_service`, not `container` — the driver's own labels are `compose_project`/`compose_service`/`platform`/`host`:
@@ -296,6 +304,6 @@ Expected delete response: `good` (record deleted) or `nochg` (record didn't exis
 - GHCR package visibility is independent of repo visibility
 - Query parameter authentication is supported but logs a warning — prefer HTTP Basic Auth
 - Gunicorn access log excludes query strings to prevent password leakage
-- Traefik's JSON access log *does* include the query string (`RequestPath`); `compose.yaml` redacts credential params in a Loki `replace` pipeline stage. Prefer HTTP Basic Auth over query-param auth.
+- Traefik's access log strips all query parameters at the producer (`--accesslog.fields.queryparameters.defaultmode=drop`), so credentials cannot reach it. Prefer HTTP Basic Auth over query-param auth regardless.
 - CSRF protection enabled for all web forms; `/nic/update` and `/nic/delete` are exempt (use Basic Auth)
 - Container runs as non-root user with read-only filesystem, dropped capabilities, and no-new-privileges

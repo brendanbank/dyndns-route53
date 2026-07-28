@@ -35,9 +35,10 @@ services:
       # Dropped because RequestPath includes the query string, and this service
       # accepts ?username=&password= auth. Remove this line only if you never
       # use query-param auth and want paths in your access log.
-      # Keep the path but strip all query parameters, so ?password= auth can
-      # never land in the log. Requires Traefik >= 3.6.
-      - "--accesslog.fields.queryparameters.defaultmode=drop"
+      # Keep the path and the query parameter names, but redact every value, so
+      # ?password= auth can never land in the log. Requires Traefik >= 3.6.
+      # Use =drop instead to remove the query string entirely.
+      - "--accesslog.fields.queryparameters.defaultmode=redact"
       # Request headers default to drop, so User-Agent must be kept by name.
       - "--accesslog.fields.headers.names.User-Agent=keep"
     ports:

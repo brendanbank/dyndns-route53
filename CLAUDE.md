@@ -210,10 +210,19 @@ Traefik access logging is enabled in both compose files (`--accesslog=true --acc
 **Credential-leak handling:** Traefik's `RequestPath` includes the query string by default, and this service accepts (though discourages) `?username=&password=` auth. This is solved **at the producer**:
 
 ```
---accesslog.fields.queryparameters.defaultmode=drop
+--accesslog.fields.queryparameters.defaultmode=keep    # compose.yaml
+--accesslog.fields.queryparameters.defaultmode=drop    # compose.example.yaml
 ```
 
-The path is kept (`/nic/update`), the whole query string is stripped before anything is written.
+`compose.yaml` logs the **full URL** including the query string, because every client on that deployment uses HTTP Basic Auth. `compose.example.yaml` keeps the safe default (`drop`), since end users following it may well use query-param auth.
+
+**`keep` is only safe while no client sends credentials in the query string.** The app logs a warning whenever one does, which is the guard — this must stay at zero:
+
+```
+{app="dyndns",container="dyndns-route53-web-1"} |= `credentials passed via query parameters`
+```
+
+Non-zero means credentials are being written to Loki in clear text: set the flag back to `drop` and fix the client. The warning also identifies the account when correlated against the `events` table by timestamp.
 
 **Only `keep` and `drop` are real modes.** `redact` is accepted by the flag parser and Traefik starts cleanly, but it behaves as `keep` — a canary request logged the full query string including the password in clear text. PR #13091 implemented keep/drop only, and an invalid mode is silently ignored rather than rejected. Requires **Traefik >= 3.6** ([PR #13091](https://github.com/traefik/traefik/pull/13091)). Per-parameter filtering (`queryparameters.names.<param>`) does **not** exist in any release as of 3.7.9 — verified by flag probe against both 3.6.24 and 3.7.9, which reject it as `field not found`. [PR #11140](https://github.com/traefik/traefik/pull/11140), which proposed it plus a separate `RequestQuery` field, was closed unmerged. `ClientUsername` (Basic Auth username, not password) is still logged.
 

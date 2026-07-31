@@ -16,22 +16,26 @@ services:
       # Traefik is the ONLY place a request path is logged: gunicorn's access
       # log is disabled and the app logs no URLs.
       #
-      # The path is kept and the whole query string is stripped at the
-      # producer -- this service accepts ?username=&password= auth, so no query
-      # value may reach the log. RequestPath logs as e.g. "/nic/update".
+      # The FULL URL is logged, query string included, so path-keyed analysis
+      # can cover this edge.
+      #
+      # This is only safe while every client authenticates with HTTP Basic Auth.
+      # The app still ACCEPTS ?username=&password= as a discouraged fallback,
+      # and anything sent that way is written here in clear text. The app logs a
+      # warning whenever it happens, so this must stay at zero:
+      #   {app="dyndns",container="dyndns-route53-web-1"}
+      #     |= `credentials passed via query parameters`
+      # If it is ever non-zero, set this back to `drop` and fix the client.
       #
       # Use ONLY keep or drop. `redact` is accepted by the flag parser and
-      # Traefik starts cleanly, but it behaves as keep: a canary request logged
-      # the full query string including the password in clear text. PR #13091
-      # implemented keep/drop only; an invalid mode is silently ignored rather
-      # than rejected, so it looks configured and protects nothing.
+      # Traefik starts cleanly, but behaves as keep -- an invalid mode falls
+      # through checkFieldValue's default branch to defaultKeep=true, and
+      # logger.go then copies req.URL.RawQuery whole. It fails OPEN.
       #
-      # Requires Traefik >= 3.6 (PR #13091). This mode is GLOBAL -- per-parameter
-      # filtering (queryparameters.names.<param>) does NOT exist in any release
-      # as of 3.7.9; both 3.6.24 and 3.7.9 reject it as "field not found", and
-      # v3.7.9's flag list has per-name maps for headers and fields but not for
-      # query parameters.
-      - "--accesslog.fields.queryparameters.defaultmode=drop"
+      # Per-parameter filtering (queryparameters.names.<param>) does NOT exist
+      # in any release as of 3.7.9; both 3.6.24 and 3.7.9 reject it as "field
+      # not found". FieldQueryParameters has a DefaultMode and no Names map.
+      - "--accesslog.fields.queryparameters.defaultmode=keep"
       # Request headers default to drop, so User-Agent must be kept by name.
       # Needed by the synthetic-monitoring exclusion in the anomalies pipeline:
       # a rule filtering on a field the edge never logs does not error, it just

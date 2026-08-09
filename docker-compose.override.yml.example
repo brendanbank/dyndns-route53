@@ -7,7 +7,7 @@
 #
 # Usage:
 #   cp docker-compose.override.yml.example docker-compose.override.yml
-#   echo 'LOKI_URL=https://loki.example.com:3100/loki/api/v1/push' >> .env
+#   echo 'LOKI_URL=https://CLASS:PASSWORD@loki.example.com:3100/loki/api/v1/push' >> .env
 #   docker compose up -d
 #
 # Requires the Loki log driver plugin on the Docker host:
@@ -17,6 +17,41 @@
 # A bare base URL silently 404s and no logs are stored. Verify with:
 #   curl -o /dev/null -w '%{http_code}\n' -XPOST -d '{}' "$LOKI_URL"
 #   -> 4xx other than 404 means the endpoint exists; 404 means wrong path.
+#
+# BASIC AUTH: the driver has no loki-username / loki-password options. The only
+# way it authenticates is userinfo embedded in loki-url, so the credential goes
+# in LOKI_URL (in .env, which is gitignored) and never in this file.
+#
+# Two consequences worth knowing before you put a password there:
+#
+#   1. It is NOT confidential to the host. Log options are stored verbatim in
+#      the container config, so the full URL -- password included -- is readable
+#      via `docker inspect <container>` and `docker compose config` by anyone in
+#      the docker group. Treat the Loki credential as host-readable and scope it
+#      to a class that may only push, not as a shared secret.
+#   2. Percent-encode reserved characters in the password (@ : / ? # are the
+#      ones that bite). A raw @ splits the authority and the driver then fails
+#      to resolve a host that does not exist.
+#
+# Verify it took effect rather than trusting this config. Two things make the
+# proxy access log a poorer witness than it first looks:
+#
+#   1. user= only carries the class name once basic auth is actually ENFORCED
+#      at the front end. While it still accepts anonymous requests, its auth
+#      module never parses the Authorization header, so user= reads - for every
+#      client regardless of how that client is configured. During a staged
+#      rollout do NOT read user=- as "the credential is not working".
+#   2. Pushes ARE written to that access log, but the agent shipping it back
+#      into Loki commonly drops them again (they are the bulk of the volume),
+#      so they may never become queryable. A push-only sender like this one can
+#      be entirely absent from a {job=...} query while working perfectly.
+#
+# What does prove it, client-side and without either caveat:
+#   docker inspect -f '{{json .HostConfig.LogConfig.Config}}' <container>
+# Log options are baked in when the container is CREATED, so `docker compose
+# up -d` (which recreates) is required to change them -- a plain `restart`
+# silently keeps the old credential. Then confirm entries are still arriving
+# under the labels this override sets (app="dyndns").
 #
 # Because the override REPLACES the whole option key, a partial copy of this
 # file silently drops whatever it omits.
@@ -37,9 +72,17 @@ services:
         # Pipeline stages for Traefik's JSON access log (--accesslog.format=json,
         # enabled in compose.yaml).
         #
-        # Credentials cannot reach these logs: Traefik strips all query
-        # parameters at the producer via
-        # --accesslog.fields.queryparameters.defaultmode=drop (see compose.yaml).
+        # WARNING -- query strings REACH these logs. compose.yaml:38 sets
+        # --accesslog.fields.queryparameters.defaultmode=keep, so the full URL
+        # is shipped here. The app still accepts ?username=&password= as a
+        # discouraged fallback, and anything sent that way lands in Loki in
+        # clear text. This is only safe while every client uses HTTP Basic
+        # Auth. The app logs a warning whenever the fallback is used, so this
+        # must stay at zero:
+        #   {app="dyndns",container="dyndns-route53-web-1"}
+        #     |= `credentials passed via query parameters`
+        # If it is ever non-zero, set defaultmode back to `drop` in
+        # compose.yaml and fix the client -- that is the producer-side fix.
         #
         # There is deliberately NO `replace` redaction stage here. One was tried
         # and is not trustworthy: it redacts correctly in every isolated test of
